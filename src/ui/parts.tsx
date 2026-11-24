@@ -161,7 +161,9 @@ export function Dropdown<T extends string>(props: {
       <button
         type="button"
         className="pf-btn pf-dropdown__trigger"
+        role="combobox"
         aria-haspopup="listbox"
+        aria-activedescendant={open ? `${listId}-${active}` : undefined}
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-label={`${props.label}: ${current?.label ?? ""}`}
@@ -177,6 +179,7 @@ export function Dropdown<T extends string>(props: {
           {props.options.map((o, i) => (
             <li
               key={o.value}
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={o.value === props.value}
               data-active={i === active}

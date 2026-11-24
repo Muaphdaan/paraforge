@@ -215,7 +215,10 @@
 
 .pf-app[data-collapsed="true"] .pf-nav {
   align-items: center;
-  width: 100%;
+  /* Room for the selected item's glow, which the narrow column would clip. */
+  padding: var(--space-2);
+  margin: 0 calc(-1 * var(--space-2));
+  width: calc(100% + 2 * var(--space-2));
   gap: var(--space-2);
 }
 
@@ -377,7 +380,7 @@
 
 /* An empty section still sits in a glass panel, like the filled screens. */
 .pf-page > .pf-empty {
-  height: 100%;
+  min-height: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   background: var(--panel);

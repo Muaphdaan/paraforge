@@ -55,7 +55,7 @@ export function Sidebar(props: { page: PageId; collapsed: boolean; onNavigate: (
         )}
         <div className="pf-syncbox" style={props.collapsed ? { justifyContent: "center", padding: 4 } : undefined}>
           {!props.collapsed && (
-            <div className="pf-syncbox__text" role="status">
+            <div className="pf-syncbox__text">
               <div>{syncLine}</div>
               <div>v{session.info?.version ?? ""}</div>
             </div>
@@ -64,7 +64,8 @@ export function Sidebar(props: { page: PageId; collapsed: boolean; onNavigate: (
             type="button"
             className="pf-iconbtn pf-iconbtn--plain"
             onClick={session.sync}
-            disabled={syncing || !session.auth?.signed_in}
+            disabled={!session.auth?.signed_in}
+            aria-disabled={syncing || undefined}
             title={session.auth?.signed_in ? "Sync with Bungie now" : "Sign in to Bungie to sync"}
           >
             <RefreshCw size={18} className={syncing ? "pf-spin" : undefined} aria-hidden="true" />

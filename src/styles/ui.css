@@ -232,7 +232,10 @@
     border-color var(--ease);
 }
 
-.pf-status:disabled {
+.pf-status:disabled,
+.pf-status[aria-disabled="true"],
+.pf-btn[aria-disabled="true"],
+.pf-iconbtn[aria-disabled="true"] {
   cursor: default;
 }
 

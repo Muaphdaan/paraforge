@@ -8,7 +8,7 @@ import { EmptyState, TierPill, VerdictPill } from "../ui/parts";
 
 export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const session = useSession();
-  const [rows, setRows] = useState<VaultRow[] | null>(null);
+  const [loaded, setLoaded] = useState<{ context: string; rows: VaultRow[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only the newest load may update the table, so a slow reply for the old context is dropped.
   const loadSeq = useRef(0);
@@ -19,7 +19,7 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
     invoke<VaultRow[]>("vault", { context }).then(
       (r) => {
         if (seq === loadSeq.current) {
-          setRows(r);
+          setLoaded({ context, rows: r });
           setError(null);
         }
       },
@@ -30,6 +30,9 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
   }, [context]);
 
   useEffect(load, [load, session.dataVersion]);
+
+  // Rows from another context are never shown under this one's label.
+  const rows = loaded && loaded.context === context ? loaded.rows : null;
 
   if (error) {
     return (

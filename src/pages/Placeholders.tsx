@@ -14,7 +14,11 @@ export function HomePage({ onNavigate }: { onNavigate: Go }) {
       </EmptyState>
     );
   }
-  if (!session.auth?.signed_in) {
+  if (!session.auth) {
+    // Still loading, or it failed and the banner offers Try again.
+    return null;
+  }
+  if (!session.auth.signed_in) {
     return (
       <EmptyState
         pose="neutral"

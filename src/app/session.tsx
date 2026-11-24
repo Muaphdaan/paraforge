@@ -11,6 +11,8 @@ type Session = {
   /** A sign-in problem reported by the Rust side (for example a refused sign-in). */
   authError: string | null;
   setAuth: (status: AuthStatus) => void;
+  /** Asks the Rust side for the sign-in status again (after it failed to load). */
+  refreshAuth: () => void;
   clearAuthError: () => void;
   /** Unix seconds of the last successful sync. */
   syncedAt: number | null;
@@ -54,7 +56,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       },
       (e) => setSyncError(String(e)),
     );
-    invoke<AuthStatus>("auth_status").then(setAuth, (e) => setAuthError(String(e)));
     const unlisten = [
       listen<string>("sync-progress", (e) => {
         if (running.current) setSyncStep(e.payload);
@@ -69,6 +70,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       unlisten.forEach((p) => p.then((f) => f()));
     };
   }, []);
+
+  const refreshAuth = useCallback(() => {
+    invoke<AuthStatus>("auth_status").then(
+      (status) => {
+        setAuth(status);
+        setAuthError(null);
+      },
+      (e) => setAuthError(String(e)),
+    );
+  }, []);
+  useEffect(refreshAuth, [refreshAuth]);
 
   const sync = useCallback(async () => {
     if (running.current) return;
@@ -95,6 +107,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     auth,
     authError,
     setAuth,
+    refreshAuth,
     clearAuthError: useCallback(() => setAuthError(null), []),
     syncedAt,
     summary,

@@ -1,6 +1,6 @@
 // Settings: Bungie account, app keys, sync and About. Phase 3 brings the full approved layout.
 // Keys go to the Rust side once and never come back to the interface.
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { KeyRound, LogIn, LogOut, RefreshCw } from "lucide-react";
 import type { AuthStatus } from "../app/api";
@@ -51,6 +51,9 @@ function AccountCard() {
     }
   }
 
+  // A sign-in in progress ends when the status changes or Bungie reports an error.
+  useEffect(() => setWaiting(false), [auth, session.authError]);
+
   const signedIn = Boolean(auth?.signed_in);
   return (
     <section className="pf-panel pf-stack" aria-labelledby="settings-account">
@@ -80,7 +83,7 @@ function AccountCard() {
       ) : auth.has_app_keys ? (
         <>
           <p className="pf-muted">
-            {waiting && !session.authError
+            {waiting
               ? "Finish signing in in your browser. ParaForge picks it up by itself."
               : "Sign in with Bungie in your browser. ParaForge never sees your password."}
           </p>
@@ -154,14 +157,11 @@ function KeysCard() {
         Your private Bungie app. The keys stay in Windows Credential Manager, never in a file. Its redirect URL is{" "}
         <span data-selectable>paraforge://auth</span>.
       </p>
-      {hasKeys ? (
-        <details className="pf-disclosure">
-          <summary>Replace keys</summary>
-          {form}
-        </details>
-      ) : (
-        form
-      )}
+      {/* One stable element, so saving the first keys does not remount the form under the cursor. */}
+      <details className="pf-disclosure" open={!hasKeys || undefined}>
+        <summary>{hasKeys ? "Replace keys" : "Add your keys"}</summary>
+        {form}
+      </details>
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
     </section>
   );
@@ -177,7 +177,7 @@ function SyncCard() {
       <h2 className="pf-panel__title" id="settings-sync">
         Sync
       </h2>
-      <p className="pf-muted" role="status">
+      <p className="pf-muted">
         {syncing
           ? `${session.syncStep}...`
           : session.syncedAt
@@ -197,7 +197,8 @@ function SyncCard() {
           type="button"
           className="pf-btn pf-btn--primary"
           onClick={session.sync}
-          disabled={syncing || !session.auth?.signed_in}
+          disabled={!session.auth?.signed_in}
+          aria-disabled={syncing || undefined}
         >
           <RefreshCw size={16} className={syncing ? "pf-spin" : undefined} aria-hidden="true" />
           {syncing ? "Syncing..." : "Sync now"}

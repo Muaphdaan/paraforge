@@ -110,8 +110,18 @@ function Banners({ page, onNavigate }: { page: PageId; onNavigate: (page: PageId
         </Banner>
       )}
       {session.authError && (
-        <Banner tone="error" onDismiss={session.clearAuthError}>
-          Sign-in failed: {session.authError}
+        <Banner
+          tone="error"
+          onDismiss={session.auth ? session.clearAuthError : undefined}
+          action={
+            !session.auth && (
+              <button type="button" className="pf-btn pf-btn--small" onClick={session.refreshAuth}>
+                Try again
+              </button>
+            )
+          }
+        >
+          {session.auth ? "Sign-in failed" : "Could not read your sign-in"}: {session.authError}
         </Banner>
       )}
       {session.auth && !signedIn && page !== "settings" && page !== "home" && (

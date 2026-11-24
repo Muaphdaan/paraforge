@@ -59,7 +59,7 @@ function SyncStatus() {
   const signedIn = Boolean(session.auth?.signed_in);
   if (session.syncStep) {
     return (
-      <button type="button" className="pf-status pf-status--busy" disabled aria-live="polite">
+      <button type="button" className="pf-status pf-status--busy" aria-disabled="true">
         <RefreshCw size={16} className="pf-spin" aria-hidden="true" />
         Syncing...
       </button>
