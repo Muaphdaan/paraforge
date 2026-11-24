@@ -3,6 +3,8 @@
 
 mod auth;
 mod sync;
+#[cfg(windows)]
+mod window_style;
 
 use std::sync::Mutex;
 
@@ -20,6 +22,8 @@ struct AppInfo {
     core_version: &'static str,
     schema_version: i64,
     ruleset: String,
+    /// Unix seconds of the last successful vault sync, if there has been one.
+    synced_at: Option<i64>,
 }
 
 #[tauri::command]
@@ -30,6 +34,7 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         core_version: paraforge_core::VERSION,
         schema_version: db.schema_version().map_err(|e| e.to_string())?,
         ruleset: ScoringRules::default().ruleset,
+        synced_at: db.meta("synced_at").map_err(|e| e.to_string())?.and_then(|v| v.parse().ok()),
     })
 }
 
@@ -76,6 +81,10 @@ pub fn run() {
             let db = Database::open(dir.join("paraforge.sqlite"))?;
             app.manage(AppState { db: Mutex::new(db) });
             app.manage(sync::SyncState::default());
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                window_style::paint_title_bar(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

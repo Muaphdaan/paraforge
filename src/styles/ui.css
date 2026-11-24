@@ -1,0 +1,564 @@
+/* Shared controls. Every interactive part has default, hover, pressed, focus,
+   selected, disabled and loading states (design spec, "Components and states"). */
+
+/* Glass surfaces */
+.pf-panel,
+.pf-card {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 var(--highlight);
+  backdrop-filter: blur(var(--blur));
+}
+
+.pf-panel {
+  padding: var(--space-4);
+  border-radius: var(--radius-panel);
+}
+
+.pf-card {
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+}
+
+.pf-panel__title {
+  font-size: var(--text-panel-title);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pf-muted {
+  color: var(--text-muted);
+}
+
+.pf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pf-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Buttons */
+.pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  padding: 0 20px;
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-pill);
+  background: rgb(28 34 69 / 0.55);
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease),
+    filter var(--ease);
+}
+
+.pf-btn:hover:not(:disabled) {
+  background: var(--panel-raised);
+  border-color: #7480c9;
+}
+
+.pf-btn:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.pf-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pf-btn--small {
+  height: 32px;
+  padding: 0 14px;
+  font-size: var(--text-label);
+}
+
+.pf-btn--wide {
+  width: 100%;
+}
+
+.pf-btn--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* The mockup drew hover the same as default; hover is slightly brighter, with a soft glow. */
+.pf-btn--primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: #63edff;
+  box-shadow: var(--glow-accent);
+}
+
+.pf-btn--danger {
+  border-color: var(--shard);
+  background: rgb(255 77 94 / 0.12);
+  color: #ff7a87;
+}
+
+.pf-btn--danger:hover:not(:disabled) {
+  border-color: var(--shard);
+  background: rgb(255 77 94 / 0.22);
+}
+
+.pf-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--control-outline);
+  border-radius: 50%;
+  background: rgb(28 34 69 / 0.55);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease);
+}
+
+.pf-iconbtn:hover:not(:disabled) {
+  background: var(--panel-raised);
+  border-color: #7480c9;
+}
+
+.pf-iconbtn:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.pf-iconbtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pf-iconbtn--plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* Dropdown */
+.pf-dropdown {
+  position: relative;
+}
+
+.pf-dropdown__trigger {
+  min-width: 120px;
+  justify-content: space-between;
+  padding: 0 14px 0 18px;
+  font-weight: 600;
+}
+
+.pf-dropdown__trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+.pf-dropdown__chevron {
+  transition: transform var(--ease);
+}
+
+.pf-dropdown__trigger[aria-expanded="true"] .pf-dropdown__chevron {
+  transform: rotate(180deg);
+}
+
+.pf-dropdown__menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--panel-solid);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+  list-style: none;
+}
+
+.pf-dropdown__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-small);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pf-dropdown__option[data-active="true"] {
+  background: var(--panel-raised);
+}
+
+.pf-dropdown__check {
+  color: var(--accent);
+}
+
+/* Status pill (header) */
+.pf-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-pill);
+  background: rgb(28 34 69 / 0.55);
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease);
+}
+
+.pf-status:disabled {
+  cursor: default;
+}
+
+.pf-status:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.pf-status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.pf-status--live {
+  border-color: var(--live);
+  background: rgb(52 211 153 / 0.12);
+  color: #b7f5dc;
+}
+
+.pf-status--live .pf-status__dot {
+  color: var(--live);
+}
+
+.pf-status--busy {
+  border-color: var(--accent);
+  background: rgb(34 229 255 / 0.1);
+}
+
+.pf-status--busy svg {
+  color: var(--accent);
+}
+
+.pf-status--warn {
+  border-color: var(--replace);
+  background: rgb(255 176 32 / 0.12);
+}
+
+.pf-status--warn svg {
+  color: var(--replace);
+}
+
+.pf-spin {
+  animation: pf-spin 1.2s linear infinite;
+}
+
+@keyframes pf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Small tags and badges */
+.pf-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pf-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-2);
+  /* Dark text on pink: white fails the contrast check (design spec). */
+  color: var(--on-accent);
+  font-size: var(--text-caption);
+  font-weight: 800;
+}
+
+.pf-kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--control-outline);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+/* Banner: a condition that lasts (sync failed, signed out). */
+.pf-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  backdrop-filter: blur(var(--blur));
+  font-weight: 600;
+}
+
+.pf-banner__text {
+  flex: 1;
+  min-width: 0;
+  user-select: text;
+}
+
+.pf-banner--error {
+  border-color: var(--shard);
+  background: rgb(60 18 34 / 0.85);
+}
+
+.pf-banner--error > svg {
+  color: var(--shard);
+}
+
+.pf-banner--warn {
+  border-color: var(--replace);
+  background: rgb(54 38 14 / 0.85);
+}
+
+.pf-banner--warn > svg {
+  color: var(--replace);
+}
+
+.pf-banner--info > svg {
+  color: var(--accent);
+}
+
+/* Empty state with the mascot */
+.pf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 100%;
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+
+.pf-empty__mascot {
+  width: 168px;
+  height: 168px;
+  margin-bottom: var(--space-2);
+  filter: drop-shadow(0 0 18px rgb(34 229 255 / 0.18));
+}
+
+.pf-empty__title {
+  max-width: 420px;
+  font-size: var(--text-panel-title);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.pf-empty__text {
+  max-width: 460px;
+  color: var(--text-muted);
+  font-size: var(--text-name);
+}
+
+.pf-empty__action {
+  margin-top: var(--space-4);
+}
+
+/* Fields */
+.pf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pf-field__label {
+  font-size: var(--text-label);
+  font-weight: 600;
+}
+
+.pf-input {
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 14px;
+  border: 1px solid var(--control-outline);
+  border-radius: 10px;
+  background: rgb(11 13 31 / 0.6);
+  color: var(--text);
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
+}
+
+.pf-input::placeholder {
+  color: var(--text-muted);
+}
+
+.pf-input:hover {
+  border-color: #7480c9;
+}
+
+.pf-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--glow-accent);
+}
+
+/* Table */
+.pf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-table th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.pf-table td {
+  padding: 10px var(--space-3);
+  border-bottom: 1px solid rgb(46 53 102 / 0.5);
+}
+
+.pf-table tbody tr {
+  transition: background var(--ease);
+}
+
+.pf-table tbody tr:hover {
+  background: var(--panel-raised);
+}
+
+.pf-table__name {
+  font-size: var(--text-name);
+  font-weight: 700;
+}
+
+.pf-table__num {
+  font-weight: 700;
+  text-align: right;
+}
+
+/* Key and value list (About) */
+.pf-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-6);
+}
+
+.pf-facts dt {
+  color: var(--text-muted);
+}
+
+.pf-facts dd {
+  font-weight: 600;
+  user-select: text;
+}
+
+/* Four-point sparkle */
+.pf-sparkle {
+  flex: none;
+  color: var(--accent-2);
+  filter: drop-shadow(0 0 4px rgb(255 61 184 / 0.6));
+  animation: pf-twinkle 4s ease-in-out infinite;
+}
+
+@keyframes pf-twinkle {
+  50% {
+    opacity: 0.55;
+    transform: scale(0.88);
+  }
+}
+
+/* Verdict pill: dark tint of its colour, 1 px border, the word in the colour, always with an icon. */
+.pf-verdict {
+  --v: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--v);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--v) 12%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--v) 25%, transparent);
+  color: var(--v);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.pf-verdict--keep {
+  --v: var(--keep);
+}
+
+.pf-verdict--upgrade {
+  --v: var(--upgrade);
+}
+
+.pf-verdict--replace {
+  --v: var(--replace);
+}
+
+.pf-verdict--shard {
+  --v: var(--shard);
+}
+
+.pf-tier {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-pill);
+  background: rgb(28 34 69 / 0.55);
+  font-size: var(--text-label);
+  font-weight: 700;
+}

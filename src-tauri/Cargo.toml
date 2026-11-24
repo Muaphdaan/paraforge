@@ -28,3 +28,4 @@ tokio = { version = "1", features = ["sync"] }
 
 [target."cfg(windows)".dependencies]
 windows-native-keyring-store = "1"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

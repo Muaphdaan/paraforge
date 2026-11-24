@@ -1,0 +1,386 @@
+/* The window shell: backdrop, floating sidebar, page header and content area.
+   Panels float 12 px apart and 12 px from the window edge. */
+
+.pf-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: center bottom / cover no-repeat;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.pf-app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: var(--gap);
+  height: 100%;
+  padding: var(--gap);
+  transition: grid-template-columns var(--ease);
+}
+
+.pf-app[data-collapsed="true"] {
+  grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr);
+}
+
+/* Sidebar */
+.pf-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-4) var(--space-2) var(--space-3);
+  overflow: hidden;
+}
+
+.pf-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1) 0 var(--space-4);
+  text-align: center;
+}
+
+.pf-brand__logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+
+.pf-brand__name {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.pf-brand__tagline {
+  font-size: var(--text-label);
+  font-weight: 600;
+}
+
+.pf-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden auto;
+  /* Room for the selected item's glow. */
+  padding: var(--space-1);
+  margin: 0 calc(-1 * var(--space-1));
+}
+
+.pf-nav__group {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pf-nav__divider {
+  height: 1px;
+  margin: var(--space-3) var(--space-3);
+  border: 0;
+  background: var(--border);
+}
+
+.pf-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-name);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease);
+}
+
+.pf-nav__item svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.pf-nav__item:hover {
+  background: var(--panel-raised);
+}
+
+.pf-nav__item:active {
+  filter: brightness(0.95);
+}
+
+.pf-nav__item[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--panel-raised);
+  box-shadow:
+    var(--glow-accent),
+    inset 0 0 12px rgb(34 229 255 / 0.12);
+}
+
+.pf-nav__item[aria-current="page"] svg {
+  color: var(--accent);
+}
+
+.pf-nav__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-sidebar__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) 0;
+}
+
+.pf-sidebar__mascot {
+  width: 112px;
+  height: 112px;
+  filter: drop-shadow(0 0 14px rgb(34 229 255 / 0.2));
+}
+
+.pf-sidebar__quote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-label);
+  font-style: italic;
+}
+
+.pf-sidebar__quote svg {
+  flex: none;
+  color: var(--accent-2);
+  fill: var(--accent-2);
+  filter: drop-shadow(0 0 4px rgb(255 61 184 / 0.6));
+}
+
+.pf-syncbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: rgb(11 13 31 / 0.45);
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  line-height: 1.35;
+}
+
+.pf-syncbox__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pf-syncbox__text > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Collapsed sidebar: icons only. */
+.pf-app[data-collapsed="true"] .pf-sidebar {
+  align-items: center;
+  padding-inline: var(--space-2);
+}
+
+.pf-app[data-collapsed="true"] .pf-brand {
+  padding-bottom: var(--space-3);
+}
+
+.pf-app[data-collapsed="true"] .pf-brand__logo {
+  width: 44px;
+  height: 44px;
+}
+
+.pf-app[data-collapsed="true"] .pf-nav {
+  align-items: center;
+  width: 100%;
+  gap: var(--space-2);
+}
+
+.pf-app[data-collapsed="true"] .pf-nav__item {
+  position: relative;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+
+.pf-app[data-collapsed="true"] .pf-nav__divider {
+  width: 32px;
+  margin: var(--space-2) 0;
+}
+
+.pf-app[data-collapsed="true"] .pf-nav__item .pf-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 10px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  font-size: 0;
+}
+
+/* Short windows: the mascot and quote make room for the navigation. */
+@media (max-height: 800px) {
+  .pf-sidebar__mascot,
+  .pf-sidebar__quote {
+    display: none;
+  }
+}
+
+/* Main column */
+.pf-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+.pf-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-1) var(--space-1) 0 var(--space-3);
+}
+
+.pf-header__lead {
+  flex: 1;
+  min-width: 0;
+}
+
+.pf-header__trail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.pf-header__collapse {
+  width: 32px;
+  height: 32px;
+}
+
+.pf-crumbs {
+  margin-left: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.pf-crumbs [aria-current="page"] {
+  color: var(--text);
+}
+
+.pf-header__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--text-page-title);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pf-header__title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-header__subtitle {
+  color: var(--text-muted);
+  font-size: var(--text-body);
+}
+
+.pf-header__tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pf-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+}
+
+.pf-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Page layouts */
+.pf-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: var(--gap);
+  align-content: start;
+}
+
+.pf-vault__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.pf-vault__summary {
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-muted);
+}
+
+.pf-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 460px;
+}
+
+.pf-disclosure > summary {
+  width: fit-content;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-small);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* An empty section still sits in a glass panel, like the filled screens. */
+.pf-page > .pf-empty {
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 var(--highlight);
+  backdrop-filter: blur(var(--blur));
+}
