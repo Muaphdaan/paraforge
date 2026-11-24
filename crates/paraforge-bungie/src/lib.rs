@@ -78,7 +78,7 @@ impl AppCredentials {
             return Err("The API key should be 32 letters and numbers (0-9, a-f).".into());
         }
         if self.client_id.is_empty() || !self.client_id.chars().all(|c| c.is_ascii_digit()) {
-            return Err("The OAuth client_id should be a number.".into());
+            return Err("The OAuth client_id should be a number, like 51234 (shown under App Authentication on your Bungie app page).".into());
         }
         let secret = self.client_secret.expose();
         if secret.len() < 20 || secret.chars().any(char::is_whitespace) {
@@ -86,6 +86,17 @@ impl AppCredentials {
         }
         Ok(())
     }
+}
+
+/// Accepts either the bare client id or a pasted Bungie authorization link that contains it.
+pub fn normalize_client_id(input: &str) -> String {
+    let input = input.trim();
+    if let Ok(url) = Url::parse(input)
+        && let Some((_, id)) = url.query_pairs().find(|(k, _)| k.eq_ignore_ascii_case("client_id"))
+    {
+        return id.trim().to_string();
+    }
+    input.to_string()
 }
 
 /// Tokens from a successful sign-in. Times are Unix seconds.
@@ -325,6 +336,19 @@ mod tests {
         let mut bad = app();
         bad.client_secret = Secret::new("short");
         assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn client_id_can_be_pasted_as_a_link() {
+        assert_eq!(normalize_client_id(" 51234 "), "51234");
+        assert_eq!(
+            normalize_client_id("https://www.bungie.net/en/OAuth/Authorize?client_id=51234&response_type=code"),
+            "51234"
+        );
+        assert_eq!(
+            normalize_client_id("https://www.bungie.net/en/OAuth/Authorize"),
+            "https://www.bungie.net/en/OAuth/Authorize"
+        );
     }
 
     #[test]

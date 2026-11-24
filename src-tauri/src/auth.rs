@@ -143,7 +143,7 @@ pub fn auth_status() -> Result<AuthStatus, String> {
 pub fn save_app_keys(api_key: String, client_id: String, client_secret: String) -> Result<AuthStatus, String> {
     let keys = AppCredentials {
         api_key: Secret::new(api_key.trim()),
-        client_id: client_id.trim().to_string(),
+        client_id: normalize_client_id(&client_id),
         client_secret: Secret::new(client_secret.trim()),
     };
     keys.validate()?;
