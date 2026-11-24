@@ -224,21 +224,34 @@ impl Database {
         rows.map(|r| r.map(WeaponHash).map_err(DbError::from)).collect()
     }
 
-    /// Replaces the whole vault with a fresh sync snapshot. Copies no longer owned are removed.
+    /// Replaces the whole vault with a fresh sync snapshot. Copies no longer owned are removed,
+    /// and stored scores are dropped for any copy that is gone or has changed since it was scored.
     pub fn replace_copies(&mut self, copies: &[WeaponCopy], synced_at: &str) -> Result<()> {
         let tx = self.conn.transaction()?;
+        let old: HashMap<String, (u32, u8, String, bool)> = {
+            let mut stmt =
+                tx.prepare("SELECT instance_id, weapon_hash, tier, columns, masterworked FROM weapon_copy")?;
+            stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?
+                .collect::<rusqlite::Result<_>>()?
+        };
         tx.execute("DELETE FROM weapon_copy", [])?;
         {
-            let mut stmt = tx.prepare(
+            let mut insert = tx.prepare(
                 "INSERT INTO weapon_copy(instance_id, weapon_hash, tier, columns, masterworked, locked, synced_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
+            let mut stale = tx.prepare("DELETE FROM copy_score WHERE instance_id = ?1")?;
             for c in copies {
-                stmt.execute(params![
+                let columns = serde_json::to_string(&c.columns)?;
+                let now = (c.weapon.0, c.tier.get(), columns.clone(), c.masterworked);
+                if old.get(&c.instance_id) != Some(&now) {
+                    stale.execute([&c.instance_id])?;
+                }
+                insert.execute(params![
                     c.instance_id,
                     c.weapon.0,
                     c.tier.get(),
-                    serde_json::to_string(&c.columns)?,
+                    columns,
                     c.masterworked,
                     c.locked,
                     synced_at
@@ -342,15 +355,19 @@ impl Database {
         Ok(out)
     }
 
-    pub fn save_scores(&mut self, scores: &[CopyScore]) -> Result<()> {
+    /// Stores the result of a scoring pass for one context, replacing that context's previous scores,
+    /// so a copy that could not be scored this time does not keep an old verdict.
+    pub fn save_scores(&mut self, context: Context, scores: &[CopyScore]) -> Result<()> {
         let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM copy_score WHERE context = ?1", [context.as_str()])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO copy_score(instance_id, context, score, verdict, ruleset, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(instance_id, context) DO UPDATE SET score = excluded.score, verdict = excluded.verdict,
-                     ruleset = excluded.ruleset, detail = excluded.detail",
+                "INSERT INTO copy_score(instance_id, context, score, verdict, ruleset, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for s in scores {
+                if s.context != context {
+                    return Err(DbError::Corrupt(format!("score for {} is not in context {context}", s.instance_id)));
+                }
                 stmt.execute(params![
                     s.instance_id,
                     s.context.as_str(),

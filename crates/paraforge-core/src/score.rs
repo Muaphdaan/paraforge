@@ -154,7 +154,8 @@ fn round1(value: f64) -> f64 {
 
 fn column_quality(column: &CopyColumn, context: Context, ratings: &PerkRatings, rules: &ScoringRules) -> (f64, bool) {
     if column.options.is_empty() {
-        return (0.0, true);
+        // No perk data for this column: score it as nothing, and do not count it as known.
+        return (0.0, false);
     }
     // The player can pick any option, so the column is as good as its best option.
     // The column counts as known when that best option is rated (rated wins ties).
@@ -339,7 +340,9 @@ pub fn score_vault(
         let (best_index, best_score) = (group[0].0, group[0].1.score);
         for (position, (index, mut a)) in group.into_iter().enumerate() {
             let copy = &copies[index];
-            let verdict = if position > 0 && best_score - a.score >= rules.duplicate_margin {
+            // A worse copy is a duplicate to shard only if even fully upgraded it stays clearly
+            // behind the best copy; otherwise it is judged on its own (it may be worth upgrading).
+            let verdict = if position > 0 && best_score - a.potential >= rules.duplicate_margin {
                 a.reasons.push(Reason::BetterCopyOwned {
                     instance_id: copies[best_index].instance_id.clone(),
                     score: best_score,
