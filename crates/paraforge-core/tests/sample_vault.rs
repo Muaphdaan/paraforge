@@ -254,10 +254,23 @@ fn database_round_trip() {
         &db.rolls().unwrap(),
         &ScoringRules::default(),
     );
-    db.save_scores(&out.scores).unwrap();
+    db.save_scores(Context::Pve, &out.scores).unwrap();
     let stored = db.scores(Context::Pve).unwrap();
     assert_eq!(stored.len(), 8);
     assert_eq!(stored[0].instance_id, "nl-1", "highest score first");
+
+    // A changed copy loses its stale score; an unchanged one keeps it.
+    let mut changed = v.clone();
+    changed.iter_mut().find(|c| c.instance_id == "go-1").unwrap().masterworked = true;
+    db.replace_copies(&changed, "2026-11-24T21:01:00Z").unwrap();
+    let ids: Vec<String> = db.scores(Context::Pve).unwrap().into_iter().map(|s| s.instance_id).collect();
+    assert!(!ids.contains(&"go-1".to_string()));
+    assert!(ids.contains(&"nl-1".to_string()));
+
+    // Saving a pass replaces the context's scores: a copy skipped this time keeps no old verdict.
+    db.save_scores(Context::Pve, &out.scores[..2]).unwrap();
+    assert_eq!(db.scores(Context::Pve).unwrap().len(), 2);
+    db.save_scores(Context::Pve, &out.scores).unwrap();
 
     // A new sync without sv-3 drops the copy and its score.
     v.retain(|c| c.instance_id != "sv-3");
@@ -283,4 +296,34 @@ fn reopening_a_file_keeps_data() {
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_worse_copy_that_can_catch_up_is_not_sharded() {
+    // Same weapon and tier, no curated roll. A is upgraded but has weaker perks; B has better
+    // perks but is not upgraded yet, so it scores lower today and higher once upgraded.
+    let f = fixture();
+    let mut r = PerkRatings::new();
+    for (perk, v) in
+        [(BARREL_OK, 0.8), (MAG_OK, 0.8), (TRAIT_MID, 0.8), (BARREL_GOOD, 0.81), (MAG_GOOD, 0.81), (TRAIT_TOP_A, 0.81)]
+    {
+        r.set(Context::Pve, PerkHash(perk), v);
+    }
+    let a = copy("a", 2, 3, [BARREL_OK, MAG_OK, TRAIT_MID, TRAIT_MID], [true; 4], true);
+    let b = copy("b", 2, 3, [BARREL_GOOD, MAG_GOOD, TRAIT_TOP_A, TRAIT_TOP_A], [false; 4], false);
+    let out = score_vault(&f.defs, &[a, b], Context::Pve, &r, &[], &ScoringRules::default());
+    let (sa, sb) = (&out.scores[0], &out.scores[1]);
+    assert!(sa.score > sb.score && sb.potential > sa.score, "a {} b {}..{}", sa.score, sb.score, sb.potential);
+    assert_ne!(sb.verdict, Verdict::Shard, "{:?}", sb.reasons);
+}
+
+#[test]
+fn empty_columns_lower_confidence() {
+    let f = fixture();
+    let mut c = copy("x", 2, 3, [BARREL_GOOD, MAG_GOOD, TRAIT_TOP_A, TRAIT_TOP_B], [false; 4], false);
+    for col in &mut c.columns {
+        col.options.clear();
+    }
+    let out = score_vault(&f.defs, &[c], Context::Pve, &ratings(), &f.rolls, &ScoringRules::default());
+    assert_eq!(out.scores[0].confidence, 0.0);
 }
