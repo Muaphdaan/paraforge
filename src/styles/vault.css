@@ -76,6 +76,11 @@
   box-shadow: none;
 }
 
+.pf-search__icon {
+  display: flex;
+  cursor: text;
+}
+
 .pf-search__clear {
   display: grid;
   place-items: center;
@@ -180,6 +185,8 @@
   margin: 0 calc(-1 * var(--space-4));
   padding: 0 var(--space-4) var(--space-4);
   overflow: auto;
+  /* Keep focused tiles clear of the sticky section title. */
+  scroll-padding-top: 48px;
 }
 
 /* Sections (slot, type or verdict) */
@@ -490,6 +497,7 @@
 
 /* Detail panel */
 .pf-detail {
+  container: detail / inline-size;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -684,7 +692,7 @@
 
 .pf-copy {
   display: grid;
-  grid-template-columns: 28px 44px 1fr 32px auto;
+  grid-template-columns: 28px 44px minmax(0, 1fr) 32px auto;
   align-items: center;
   gap: var(--space-2);
   padding: 6px var(--space-2);
@@ -711,7 +719,15 @@
 
 .pf-copy__perks {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
+  min-width: 0;
+}
+
+/* A narrow detail panel puts the verdict under the perks. */
+@container detail (max-width: 360px) {
+  .pf-copy { grid-template-columns: 28px 44px minmax(0, 1fr) 32px; }
+  .pf-copy > .pf-verdict { grid-column: 3 / -1; justify-self: start; }
 }
 
 .pf-copy__score {

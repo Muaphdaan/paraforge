@@ -9,7 +9,7 @@ import { BungieImage, ElementIcon, WeaponTile } from "../ui/weapon";
 
 type Go = (page: PageId) => void;
 
-export function HomePage({ onNavigate }: { onNavigate: Go }) {
+export function HomePage({ onNavigate, onOpenWeapon }: { onNavigate: Go; onOpenWeapon: (instanceId: string) => void }) {
   const session = useSession();
   const rows = session.vault;
 
@@ -45,6 +45,15 @@ export function HomePage({ onNavigate }: { onNavigate: Go }) {
       </EmptyState>
     );
   }
+  if (session.vaultError) {
+    return (
+      <EmptyState pose="confused" title="Your vault could not be read">
+        {session.vaultError}
+      </EmptyState>
+    );
+  }
+  // The vault for a newly picked score context is still loading.
+  if (rows === null && session.info?.synced_at) return null;
   if (!rows || rows.length === 0) {
     return session.syncStep ? (
       <EmptyState pose="thinking" title="Syncing your vault">
@@ -116,7 +125,7 @@ export function HomePage({ onNavigate }: { onNavigate: Go }) {
         </div>
         <div className="pf-tiles">
           {stats.best.map((r) => (
-            <WeaponTile key={r.instance_id} row={r} selected={false} onSelect={() => onNavigate("vault")} />
+            <WeaponTile key={r.instance_id} row={r} onSelect={() => onOpenWeapon(r.instance_id)} />
           ))}
         </div>
       </section>

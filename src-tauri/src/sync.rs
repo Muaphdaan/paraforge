@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use paraforge_bungie::api::{ApiError, BungieApi, DestinyMembership};
 use paraforge_bungie::inventory::RawProfile;
 use paraforge_bungie::inventory::{EnhancedPerks, RawItemDef, RawPlugSetDef, build_catalog, read_profile};
-use paraforge_core::{Context, PerkInfo, ScoringRules, VaultRow, score_vault};
+use paraforge_core::{Context, PerkInfo, ScoreError, ScoringRules, VaultRow, score_vault};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -172,7 +172,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let mut not_scored = 0;
     for context in Context::ALL {
         let out = score_vault(&defs, &read.copies, context, &ratings, &rolls, &rules);
-        not_scored = not_scored.max(out.skipped.len());
+        // Exotics and other fixed-perk weapons have nothing to score; they are not failures.
+        let failed = out.skipped.iter().filter(|(_, e)| *e != ScoreError::NoColumns).count();
+        not_scored = not_scored.max(failed);
         db.save_scores(context, &out.scores).map_err(|e| e.to_string())?;
     }
     db.set_meta(META_SYNCED_AT, &synced_at.to_string()).map_err(|e| e.to_string())?;

@@ -27,9 +27,19 @@ function Shell() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const page = history[history.length - 1];
 
+  // The weapon to open when the Vault is reached from a Home tile; any other navigation clears it.
+  const [vaultFocus, setVaultFocus] = useState<string | null>(null);
   const navigate = useCallback((next: PageId) => {
+    setVaultFocus(null);
     setHistory((h) => (h[h.length - 1] === next ? h : [...h.slice(-49), next]));
   }, []);
+  const openWeapon = useCallback(
+    (instanceId: string) => {
+      navigate("vault");
+      setVaultFocus(instanceId);
+    },
+    [navigate],
+  );
   const back = useCallback(() => setHistory((h) => (h.length > 1 ? h.slice(0, -1) : h)), []);
   const toggleSidebar = useCallback(() => setCollapsed((c) => !c), []);
 
@@ -75,8 +85,8 @@ function Shell() {
           <div className="pf-content">
             <Banners page={page} onNavigate={navigate} />
             <div className="pf-page">
-              {page === "home" && <HomePage onNavigate={navigate} />}
-              {page === "vault" && <VaultPage onNavigate={navigate} />}
+              {page === "home" && <HomePage onNavigate={navigate} onOpenWeapon={openWeapon} />}
+              {page === "vault" && <VaultPage onNavigate={navigate} initialSelectedId={vaultFocus} />}
               {page === "codex" && <CodexPage />}
               {page === "chase" && <ChasePage onNavigate={navigate} />}
               {page === "collections" && <CollectionsPage />}

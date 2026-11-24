@@ -99,9 +99,18 @@ export const ROLE_LABELS: Record<ColumnRole, string> = { barrel: "Barrel", magaz
 const CONTEXT_LABEL: Record<ScoreContext, string> = { pve: "PvE", pvp: "PvP" };
 
 function joinRoles(roles: ColumnRole[]): string {
-  const words = roles.map((r) => (r === "trait" ? "trait" : r));
+  const words = [...new Set(roles.map((r) => (r === "trait" ? "traits" : r)))];
   if (words.length <= 1) return words.join("");
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+/** A whole number the way Rust's `{:.0}` prints it: exact halves round to even. */
+function whole(x: unknown): string {
+  const v = Number(x);
+  const f = Math.floor(v);
+  const d = v - f;
+  const n = d > 0.5 || (d === 0.5 && f % 2 !== 0) ? f + 1 : f;
+  return String(Object.is(n, -0) ? 0 : n);
 }
 
 /** Plain English for a score reason; mirrors Reason::text in the Rust core. */
@@ -126,9 +135,9 @@ export function reasonText(reason: CopyScore["reasons"][number], context: ScoreC
     case "best_of_copies":
       return `Best of your ${r.copies} copies`;
     case "better_copy_owned":
-      return `You own a better copy (${Number(r.score).toFixed(0)})`;
+      return `You own a better copy (${whole(r.score)})`;
     case "upgrade_potential":
-      return `Masterwork and enhanced perks would take it to ${Number(r.potential).toFixed(0)}`;
+      return `Masterwork and enhanced perks would take it to ${whole(r.potential)}`;
     default:
       return reason.kind.replace(/_/g, " ");
   }

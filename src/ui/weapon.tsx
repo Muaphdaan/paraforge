@@ -16,9 +16,10 @@ const ELEMENT_ICONS: Record<number, LucideIcon> = {
 
 /** A bungie.net image that quietly disappears when it cannot load (offline, or Bungie has none). */
 export function BungieImage(props: { path: string; className?: string; alt?: string }) {
-  const [failed, setFailed] = useState(false);
   const src = bungieImage(props.path);
-  if (!src || failed) return null;
+  // Remember which image failed, so a new path (another weapon) gets its own chance to load.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (!src || failedSrc === src) return null;
   return (
     <img
       className={props.className}
@@ -26,7 +27,7 @@ export function BungieImage(props: { path: string; className?: string; alt?: str
       alt={props.alt ?? ""}
       loading="lazy"
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(src)}
     />
   );
 }
@@ -66,7 +67,7 @@ const VERDICT_LABEL = { keep: "Keep", upgrade: "Upgrade", replace: "Replace", sh
  * The DIM-style weapon tile: Bungie's icon with its season badge, a gold frame for exotics,
  * the score in the verdict's colour, the element, tier pips and a lock when locked.
  */
-export function WeaponTile(props: { row: VaultRow; selected: boolean; onSelect: () => void }) {
+export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect: () => void }) {
   const { row } = props;
   const verdict = row.score?.verdict;
   const label = [
@@ -83,6 +84,7 @@ export function WeaponTile(props: { row: VaultRow; selected: boolean; onSelect: 
       type="button"
       className="pf-tile"
       data-rarity={row.look.rarity}
+      data-instance={row.instance_id}
       data-masterworked={row.masterworked || undefined}
       aria-pressed={props.selected}
       aria-label={label}

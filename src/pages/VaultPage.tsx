@@ -1,6 +1,6 @@
 // The Vault: every owned copy as a weapon tile (or a row), organised by slot and weapon type,
 // with search, verdict filters, grouping, sorting and a detail panel for the selected copy.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { LayoutGrid, List, Search, X } from "lucide-react";
 import { Perk, SLOTS, Verdict, VaultRow } from "../app/api";
 import { PageId } from "../app/pages";
@@ -94,12 +94,19 @@ function matches(row: VaultRow, words: string[], perks: Record<number, Perk>): b
   return words.every((w) => haystack.includes(w));
 }
 
-export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
+export function VaultPage({
+  onNavigate,
+  initialSelectedId = null,
+}: {
+  onNavigate: (page: PageId) => void;
+  initialSelectedId?: string | null;
+}) {
   const session = useSession();
   const [prefs, setPrefs] = useState(readPrefs);
+  const searchId = useId();
   const [query, setQuery] = useState("");
   const [verdict, setVerdict] = useState<Verdict | "all">("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
 
   useEffect(() => {
     try {
@@ -110,6 +117,14 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
   }, [prefs]);
 
   const rows = session.vault;
+  // Opened from a Home tile: bring that weapon into view once the vault is on screen.
+  const hasRows = Boolean(rows?.length);
+  useEffect(() => {
+    if (!initialSelectedId || !hasRows) return;
+    document
+      .querySelector(`.pf-vault__scroll [data-instance="${CSS.escape(initialSelectedId)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [initialSelectedId, hasRows]);
   const words = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
   const searched = useMemo(
     () => (rows ?? []).filter((r) => matches(r, words, session.perks)),
@@ -168,11 +183,14 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
     <div className="pf-vault">
       <section className="pf-panel pf-vault__main" aria-label="Your weapons">
         <div className="pf-vault__toolbar">
-          <label className="pf-search">
-            <Search size={18} aria-hidden="true" />
-            <span className="pf-visually-hidden">Search weapons and perks</span>
+          <div className="pf-search">
+            <label htmlFor={searchId} className="pf-search__icon">
+              <Search size={18} aria-hidden="true" />
+            </label>
             <input
+              id={searchId}
               type="search"
+              aria-label="Search weapons and perks"
               value={query}
               placeholder="Search weapons and perks"
               onChange={(e) => setQuery(e.target.value)}
@@ -184,7 +202,7 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
                 <span className="pf-visually-hidden">Clear search</span>
               </button>
             )}
-          </label>
+          </div>
           <Dropdown
             label="Group by"
             value={prefs.group}
@@ -328,7 +346,13 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
 function WeaponRow(props: { row: VaultRow; perks: Record<number, Perk>; selected: boolean; onSelect: () => void }) {
   const { row } = props;
   return (
-    <button type="button" className="pf-wrow" aria-pressed={props.selected} onClick={props.onSelect}>
+    <button
+      type="button"
+      className="pf-wrow"
+      data-instance={row.instance_id}
+      aria-pressed={props.selected}
+      onClick={props.onSelect}
+    >
       <span className="pf-wrow__icon" data-rarity={row.look.rarity}>
         <WeaponTileArt row={row} />
       </span>
