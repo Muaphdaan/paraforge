@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use paraforge_bungie::api::{ApiError, BungieApi, DestinyMembership};
 use paraforge_bungie::inventory::RawProfile;
 use paraforge_bungie::inventory::{EnhancedPerks, RawItemDef, RawPlugSetDef, build_catalog, read_profile};
-use paraforge_core::{Context, ScoringRules, VaultRow, score_vault};
+use paraforge_core::{Context, PerkInfo, ScoringRules, VaultRow, score_vault};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -21,6 +21,8 @@ const ITEMS_TABLE: &str = "DestinyInventoryItemDefinition";
 const PLUG_SETS_TABLE: &str = "DestinyPlugSetDefinition";
 const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
+/// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
+const CATALOG_VERSION: &str = "catalog-2";
 
 #[derive(Default)]
 pub struct SyncState {
@@ -92,7 +94,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let manifest = api.manifest().await.map_err(api_err)?;
     let items_path = manifest.table_path(ITEMS_TABLE).ok_or("Bungie's manifest has no item table.")?.to_string();
     let sets_path = manifest.table_path(PLUG_SETS_TABLE).ok_or("Bungie's manifest has no plug set table.")?.to_string();
-    let wanted = format!("{items_path}\n{sets_path}");
+    let wanted = format!("{CATALOG_VERSION}\n{items_path}\n{sets_path}");
     let (current, have_weapons) = {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -223,9 +225,9 @@ pub fn vault(state: State<'_, AppState>, context: String) -> Result<Vec<VaultRow
     db.vault_rows(context).map_err(|e| e.to_string())
 }
 
-/// Perk names by hash, for showing perks in the vault list.
+/// Every known perk (name, icon, description) by hash, for showing perks with their icons.
 #[tauri::command]
-pub fn perk_names(state: State<'_, AppState>) -> Result<HashMap<u32, String>, String> {
+pub fn perks(state: State<'_, AppState>) -> Result<HashMap<u32, PerkInfo>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    Ok(db.perk_names().map_err(|e| e.to_string())?.into_iter().map(|(k, v)| (k.0, v)).collect())
+    Ok(db.perks().map_err(|e| e.to_string())?.into_iter().map(|p| (p.hash.0, p)).collect())
 }

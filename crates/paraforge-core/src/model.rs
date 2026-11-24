@@ -98,6 +98,31 @@ pub struct WeaponDef {
     /// The item socket index of each column, same length and order as `columns`.
     #[serde(default)]
     pub socket_indexes: Vec<u8>,
+    /// How the weapon looks and where it goes: icons, slot, element, ammo, rarity.
+    #[serde(default)]
+    pub look: WeaponLook,
+}
+
+/// Display data for a weapon, from Bungie's item definitions.
+///
+/// Image fields are bungie.net paths (for example `/common/destiny2_content/icons/...png`), empty when
+/// Bungie has none. The numbers keep Bungie's own enum values, so 0 always means unknown.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WeaponLook {
+    pub icon: String,
+    /// The season badge Bungie draws over the icon's top-left corner.
+    pub watermark: String,
+    /// A wide screenshot of the weapon, for the detail panel.
+    pub screenshot: String,
+    /// 1 Kinetic, 2 Energy, 3 Power.
+    pub slot: u8,
+    /// Bungie DamageType: 1 Kinetic, 2 Arc, 3 Thermal (Solar), 4 Void, 6 Stasis, 7 Strand.
+    pub damage: u8,
+    /// Bungie DestinyAmmunitionType: 1 Primary, 2 Special, 3 Heavy.
+    pub ammo: u8,
+    /// Bungie TierType: 5 Legendary (Superior), 6 Exotic.
+    pub rarity: u8,
 }
 
 /// One column on an owned copy.
@@ -142,6 +167,11 @@ pub struct PerkInfo {
     pub name: String,
     /// Bungie's plug category identifier, for example "barrels" or "frames".
     pub plug_category: String,
+    /// bungie.net path of the perk's icon, empty when Bungie has none.
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Provenance of a value, so the UI can badge it (official, community, ParaForge).

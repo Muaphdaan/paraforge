@@ -41,6 +41,7 @@ fn def(hash: u32, name: &str, type_name: &str) -> WeaponDef {
         type_name: type_name.into(),
         columns: vec![Barrel, Magazine, Trait, Trait],
         socket_indexes: vec![1, 2, 3, 4],
+        look: Default::default(),
     }
 }
 
@@ -223,11 +224,20 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 3);
 
-    let defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    defs[0].look = WeaponLook {
+        icon: "/common/destiny2_content/icons/a.jpg".into(),
+        slot: 2,
+        damage: 3,
+        ammo: 1,
+        rarity: 5,
+        ..Default::default()
+    };
     db.upsert_weapons(&defs).unwrap();
-    assert_eq!(db.weapons().unwrap(), f.defs);
+    let expected: HashMap<WeaponHash, WeaponDef> = defs.iter().map(|d| (d.hash, d.clone())).collect();
+    assert_eq!(db.weapons().unwrap(), expected);
     assert_eq!(db.search_weapons("static", 10).unwrap(), vec![WeaponHash(1)]);
     assert_eq!(db.search_weapons("sniper", 10).unwrap(), vec![WeaponHash(4)]);
     assert!(db.search_weapons("  ", 10).unwrap().is_empty());
@@ -284,11 +294,17 @@ fn database_round_trip() {
     assert_eq!(rows[0].name, "Night Ledger");
     assert_eq!(rows[0].score.as_ref().unwrap().verdict, Verdict::Keep);
 
-    let perks =
-        [PerkInfo { hash: PerkHash(BARREL_GOOD), name: "Arrowhead Brake".into(), plug_category: "barrels".into() }];
+    let perks = [PerkInfo {
+        hash: PerkHash(BARREL_GOOD),
+        name: "Arrowhead Brake".into(),
+        plug_category: "barrels".into(),
+        icon: "/common/destiny2_content/icons/brake.png".into(),
+        description: "Lightly vented barrel.".into(),
+    }];
     db.replace_definitions(&defs, &perks).unwrap();
     assert_eq!(db.perk_names().unwrap()[&PerkHash(BARREL_GOOD)], "Arrowhead Brake");
-    assert_eq!(db.weapons().unwrap(), f.defs);
+    assert_eq!(db.perks().unwrap(), perks.to_vec());
+    assert_eq!(db.weapons().unwrap(), expected);
 
     // An untiered (legacy) copy is stored and scored at the bottom of the tier range.
     let mut legacy = v.clone();
@@ -310,7 +326,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 3);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

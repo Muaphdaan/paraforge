@@ -1,43 +1,138 @@
-// The vault list. Phase 2 replaces this table with the approved weapon cards and detail panel.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { VaultRow } from "../app/api";
+// The Vault: every owned copy as a weapon tile (or a row), organised by slot and weapon type,
+// with search, verdict filters, grouping, sorting and a detail panel for the selected copy.
+import { useEffect, useMemo, useState } from "react";
+import { LayoutGrid, List, Search, X } from "lucide-react";
+import { Perk, SLOTS, Verdict, VaultRow } from "../app/api";
 import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
-import { EmptyState, TierPill, VerdictPill } from "../ui/parts";
+import { Dropdown, EmptyState, TierPill, VerdictPill } from "../ui/parts";
+import { BungieImage, ElementIcon, PerkIcon, WeaponTile } from "../ui/weapon";
+import { WeaponDetail } from "./WeaponDetail";
+
+type View = "grid" | "list";
+type GroupBy = "slot" | "type" | "verdict";
+type SortBy = "score" | "name" | "tier";
+
+const VERDICT_ORDER: (Verdict | "none")[] = ["keep", "upgrade", "replace", "shard", "none"];
+const VERDICT_NAMES: Record<Verdict | "none", string> = {
+  keep: "Keep",
+  upgrade: "Upgrade",
+  replace: "Replace",
+  shard: "Shard",
+  none: "Not scored",
+};
+const SLOT_ORDER = [1, 2, 3, 0];
+
+const PREFS_KEY = "paraforge.vaultPrefs";
+
+function readPrefs(): { view: View; group: GroupBy; sort: SortBy } {
+  const fallback = { view: "grid" as View, group: "slot" as GroupBy, sort: "score" as SortBy };
+  try {
+    return { ...fallback, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+  } catch {
+    return fallback;
+  }
+}
+
+type Section = { key: string; title: string; groups: { key: string; title: string | null; rows: VaultRow[] }[] };
+
+function compare(sort: SortBy) {
+  return (a: VaultRow, b: VaultRow) => {
+    if (sort === "name") return a.name.localeCompare(b.name) || b.tier - a.tier;
+    if (sort === "tier") return b.tier - a.tier || (b.score?.score ?? -1) - (a.score?.score ?? -1);
+    return (b.score?.score ?? -1) - (a.score?.score ?? -1) || a.name.localeCompare(b.name);
+  };
+}
+
+function byKey<T>(rows: VaultRow[], key: (r: VaultRow) => T): Map<T, VaultRow[]> {
+  const out = new Map<T, VaultRow[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
+
+/** Slot sections hold one group per weapon type; the other groupings have one group per section. */
+function organise(rows: VaultRow[], group: GroupBy, sort: SortBy): Section[] {
+  const cmp = compare(sort);
+  if (group === "slot") {
+    const slots = byKey(rows, (r) => (SLOTS[r.look.slot] ? r.look.slot : 0));
+    return SLOT_ORDER.filter((s) => slots.has(s)).map((slot) => {
+      const types = byKey(slots.get(slot)!, (r) => r.type_name || "Other");
+      return {
+        key: `slot-${slot}`,
+        title: SLOTS[slot],
+        groups: [...types.keys()]
+          .sort((a, b) => a.localeCompare(b))
+          .map((type) => ({ key: type, title: type, rows: types.get(type)!.sort(cmp) })),
+      };
+    });
+  }
+  if (group === "type") {
+    const types = byKey(rows, (r) => r.type_name || "Other");
+    return [...types.keys()]
+      .sort((a, b) => a.localeCompare(b))
+      .map((type) => ({ key: type, title: type, groups: [{ key: type, title: null, rows: types.get(type)!.sort(cmp) }] }));
+  }
+  const verdicts = byKey(rows, (r) => r.score?.verdict ?? "none");
+  return VERDICT_ORDER.filter((v) => verdicts.has(v)).map((v) => ({
+    key: v,
+    title: VERDICT_NAMES[v],
+    groups: [{ key: v, title: null, rows: verdicts.get(v)!.sort(cmp) }],
+  }));
+}
+
+function matches(row: VaultRow, words: string[], perks: Record<number, Perk>): boolean {
+  if (words.length === 0) return true;
+  const perkNames = row.columns.flatMap((c) => c.options.map((h) => perks[h]?.name ?? ""));
+  const haystack = [row.name, row.type_name, ...perkNames, row.locked ? "locked" : "", row.look.rarity === 6 ? "exotic" : ""]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => haystack.includes(w));
+}
 
 export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const session = useSession();
-  const [loaded, setLoaded] = useState<{ context: string; rows: VaultRow[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Only the newest load may update the table, so a slow reply for the old context is dropped.
-  const loadSeq = useRef(0);
-  const context = session.context;
+  const [prefs, setPrefs] = useState(readPrefs);
+  const [query, setQuery] = useState("");
+  const [verdict, setVerdict] = useState<Verdict | "all">("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    const seq = ++loadSeq.current;
-    invoke<VaultRow[]>("vault", { context }).then(
-      (r) => {
-        if (seq === loadSeq.current) {
-          setLoaded({ context, rows: r });
-          setError(null);
-        }
-      },
-      (e) => {
-        if (seq === loadSeq.current) setError(String(e));
-      },
-    );
-  }, [context]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+      // Without storage the view just resets next launch.
+    }
+  }, [prefs]);
 
-  useEffect(load, [load, session.dataVersion]);
+  const rows = session.vault;
+  const words = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
+  const searched = useMemo(
+    () => (rows ?? []).filter((r) => matches(r, words, session.perks)),
+    [rows, words, session.perks],
+  );
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: searched.length };
+    for (const r of searched) if (r.score) c[r.score.verdict] = (c[r.score.verdict] ?? 0) + 1;
+    return c;
+  }, [searched]);
+  const visible = useMemo(
+    () => (verdict === "all" ? searched : searched.filter((r) => r.score?.verdict === verdict)),
+    [searched, verdict],
+  );
+  const sections = useMemo(() => organise([...visible], prefs.group, prefs.sort), [visible, prefs.group, prefs.sort]);
 
-  // Rows from another context are never shown under this one's label.
-  const rows = loaded && loaded.context === context ? loaded.rows : null;
+  const selected =
+    (rows ?? []).find((r) => r.instance_id === selectedId) ?? sections[0]?.groups[0]?.rows[0] ?? null;
 
-  if (error) {
+  if (session.vaultError) {
     return (
       <EmptyState pose="confused" title="Your vault could not be read">
-        {error}
+        {session.vaultError}
       </EmptyState>
     );
   }
@@ -70,44 +165,206 @@ export function VaultPage({ onNavigate }: { onNavigate: (page: PageId) => void }
   }
 
   return (
-    <section className="pf-panel">
-      <div className="pf-vault__toolbar">
-        <p className="pf-vault__summary">
-          {rows.length} weapons. Scores use placeholder rules until the data pack arrives, so they will change.
-        </p>
-      </div>
-      <table className="pf-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Tier</th>
-            <th className="pf-table__num">Score</th>
-            <th>Verdict</th>
-            <th className="pf-table__num">Confidence</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.instance_id}>
-              <td className="pf-table__name">{r.name}</td>
-              <td className="pf-muted">{r.type_name}</td>
-              <td>
-                <TierPill tier={r.tier} />
-              </td>
-              <td className="pf-table__num">{r.score ? r.score.score.toFixed(0) : "-"}</td>
-              <td>{r.score ? <VerdictPill verdict={r.score.verdict} /> : <span className="pf-muted">-</span>}</td>
-              <td className="pf-table__num pf-muted">
-                {r.score ? `${Math.round(r.score.confidence * 100)}%` : "-"}
-              </td>
-              <td className="pf-muted">
-                {[r.masterworked && "masterworked", r.locked && "locked"].filter(Boolean).join(", ")}
-              </td>
-            </tr>
+    <div className="pf-vault">
+      <section className="pf-panel pf-vault__main" aria-label="Your weapons">
+        <div className="pf-vault__toolbar">
+          <label className="pf-search">
+            <Search size={18} aria-hidden="true" />
+            <span className="pf-visually-hidden">Search weapons and perks</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="Search weapons and perks"
+              onChange={(e) => setQuery(e.target.value)}
+              spellCheck={false}
+            />
+            {query && (
+              <button type="button" className="pf-search__clear" onClick={() => setQuery("")} title="Clear search">
+                <X size={16} aria-hidden="true" />
+                <span className="pf-visually-hidden">Clear search</span>
+              </button>
+            )}
+          </label>
+          <Dropdown
+            label="Group by"
+            value={prefs.group}
+            options={[
+              { value: "slot", label: "By slot" },
+              { value: "type", label: "By weapon type" },
+              { value: "verdict", label: "By verdict" },
+            ]}
+            onChange={(group) => setPrefs((p) => ({ ...p, group }))}
+          />
+          <Dropdown
+            label="Sort by"
+            value={prefs.sort}
+            options={[
+              { value: "score", label: "Sort: Score" },
+              { value: "name", label: "Sort: Name" },
+              { value: "tier", label: "Sort: Tier" },
+            ]}
+            onChange={(sort) => setPrefs((p) => ({ ...p, sort }))}
+          />
+          <div className="pf-segmented" role="group" aria-label="View">
+            <button
+              type="button"
+              aria-pressed={prefs.view === "grid"}
+              onClick={() => setPrefs((p) => ({ ...p, view: "grid" }))}
+              title="Icon grid"
+            >
+              <LayoutGrid size={18} aria-hidden="true" />
+              <span className="pf-visually-hidden">Icon grid</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={prefs.view === "list"}
+              onClick={() => setPrefs((p) => ({ ...p, view: "list" }))}
+              title="List"
+            >
+              <List size={18} aria-hidden="true" />
+              <span className="pf-visually-hidden">List</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="pf-filters" role="group" aria-label="Filter by verdict">
+          {(["all", "keep", "upgrade", "replace", "shard"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={`pf-filter pf-filter--${v}`}
+              aria-pressed={verdict === v}
+              onClick={() => setVerdict(v)}
+            >
+              {v === "all" ? "All" : VERDICT_NAMES[v]}
+              <span className="pf-filter__count">{counts[v] ?? 0}</span>
+            </button>
           ))}
-        </tbody>
-      </table>
-    </section>
+          <span className="pf-filters__note">Scores use placeholder rules until the data pack arrives.</span>
+        </div>
+
+        <div className="pf-vault__scroll">
+          {sections.length === 0 ? (
+            <EmptyState
+              pose="confused"
+              title="No weapons match"
+              action={
+                <button
+                  type="button"
+                  className="pf-btn"
+                  onClick={() => {
+                    setQuery("");
+                    setVerdict("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              }
+            >
+              Try fewer words or another verdict.
+            </EmptyState>
+          ) : (
+            sections.map((section) => (
+              <section key={section.key} className="pf-vsection" data-view={prefs.view} aria-label={section.title}>
+                <h2 className="pf-vsection__title">
+                  {section.title}
+                  <span className="pf-vsection__count">{section.groups.reduce((n, g) => n + g.rows.length, 0)}</span>
+                </h2>
+                <div className="pf-vsection__body">
+                {section.groups.map((group) => (
+                  <div key={group.key} className="pf-vgroup">
+                    {group.title && (
+                      <h3 className="pf-vgroup__title">
+                        {group.title} <span>{group.rows.length}</span>
+                      </h3>
+                    )}
+                    {prefs.view === "grid" ? (
+                      <div className="pf-tiles">
+                        {group.rows.map((r) => (
+                          <WeaponTile
+                            key={r.instance_id}
+                            row={r}
+                            selected={selected?.instance_id === r.instance_id}
+                            onSelect={() => setSelectedId(r.instance_id)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="pf-rows">
+                        {group.rows.map((r) => (
+                          <WeaponRow
+                            key={r.instance_id}
+                            row={r}
+                            perks={session.perks}
+                            selected={selected?.instance_id === r.instance_id}
+                            onSelect={() => setSelectedId(r.instance_id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </section>
+
+      {selected && (
+        <WeaponDetail
+          row={selected}
+          copies={rows.filter((r) => r.weapon === selected.weapon)}
+          perks={session.perks}
+          context={session.context}
+          onSelect={setSelectedId}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The list view's row: icon, name and type, element, tier, perk icons, score and verdict. */
+function WeaponRow(props: { row: VaultRow; perks: Record<number, Perk>; selected: boolean; onSelect: () => void }) {
+  const { row } = props;
+  return (
+    <button type="button" className="pf-wrow" aria-pressed={props.selected} onClick={props.onSelect}>
+      <span className="pf-wrow__icon" data-rarity={row.look.rarity}>
+        <WeaponTileArt row={row} />
+      </span>
+      <span className="pf-wrow__name">
+        <strong>{row.name}</strong>
+        <span className="pf-muted">
+          <ElementIcon damage={row.look.damage} size={12} /> {row.type_name}
+        </span>
+      </span>
+      {row.tier === 0 && row.look.rarity === 6 ? (
+        <span className="pf-tier pf-tier--exotic">Exotic</span>
+      ) : (
+        <TierPill tier={row.tier} />
+      )}
+      <span className="pf-wrow__perks">
+        {row.columns.map((c, i) =>
+          c.options.slice(0, 2).map((h) => (
+            <PerkIcon key={`${i}-${h}`} hash={h} perk={props.perks[h]} enhanced={c.enhanced} size={26} />
+          )),
+        )}
+      </span>
+      <span className={`pf-wrow__score pf-v--${row.score?.verdict ?? "none"}`}>
+        {row.score ? row.score.score.toFixed(0) : "-"}
+      </span>
+      <span className="pf-wrow__verdict">{row.score ? <VerdictPill verdict={row.score.verdict} /> : null}</span>
+    </button>
+  );
+}
+
+function WeaponTileArt({ row }: { row: VaultRow }) {
+  return (
+    <>
+      <span className="pf-tile__fallback" aria-hidden="true">
+        {row.name.slice(0, 1)}
+      </span>
+      <BungieImage path={row.look.icon} className="pf-tile__icon" />
+    </>
   );
 }

@@ -565,3 +565,8 @@
   font-size: var(--text-label);
   font-weight: 700;
 }
+
+.pf-tier--exotic {
+  border-color: rgb(232 197 71 / 0.5);
+  color: var(--exotic);
+}

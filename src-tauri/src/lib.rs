@@ -96,7 +96,7 @@ pub fn run() {
             auth::sign_out,
             sync::sync_now,
             sync::vault,
-            sync::perk_names,
+            sync::perks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

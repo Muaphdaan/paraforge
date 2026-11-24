@@ -3,7 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppInfo, AuthStatus, ScoreContext, SyncSummary } from "./api";
+import type { AppInfo, AuthStatus, Perk, ScoreContext, SyncSummary, VaultRow } from "./api";
 
 type Session = {
   info: AppInfo | null;
@@ -26,6 +26,11 @@ type Session = {
   dataVersion: number;
   context: ScoreContext;
   setContext: (context: ScoreContext) => void;
+  /** The stored vault scored for the current context; null while it loads. */
+  vault: VaultRow[] | null;
+  vaultError: string | null;
+  /** Every known perk by hash, with its icon and description. */
+  perks: Record<number, Perk>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -47,6 +52,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [dataVersion, setDataVersion] = useState(0);
   const [context, setContext] = useState<ScoreContext>("pve");
   const running = useRef(false);
+  const [loaded, setLoaded] = useState<{ context: ScoreContext; rows: VaultRow[] } | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [perks, setPerks] = useState<Record<number, Perk>>({});
+  const loadSeq = useRef(0);
+
+  // Reload the vault for the current context after each sync; only the newest reply counts.
+  useEffect(() => {
+    const seq = ++loadSeq.current;
+    invoke<VaultRow[]>("vault", { context }).then(
+      (rows) => {
+        if (seq === loadSeq.current) {
+          setLoaded({ context, rows });
+          setVaultError(null);
+        }
+      },
+      (e) => {
+        if (seq === loadSeq.current) setVaultError(String(e));
+      },
+    );
+  }, [context, dataVersion]);
+
+  useEffect(() => {
+    invoke<Record<number, Perk>>("perks").then(setPerks, () => setPerks({}));
+  }, [dataVersion]);
 
   useEffect(() => {
     invoke<AppInfo>("app_info").then(
@@ -118,6 +147,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     dataVersion,
     context,
     setContext,
+    // Rows from the other context are never shown under this one's label.
+    vault: loaded && loaded.context === context ? loaded.rows : null,
+    vaultError,
+    perks,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

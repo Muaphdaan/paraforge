@@ -1,69 +1,8 @@
 // Sections whose data does not exist yet. Each says what it will hold and what comes first.
 import { PageId } from "../app/pages";
-import { useSession } from "../app/session";
 import { EmptyState } from "../ui/parts";
 
 type Go = (page: PageId) => void;
-
-export function HomePage({ onNavigate }: { onNavigate: Go }) {
-  const session = useSession();
-  if (session.syncStep) {
-    return (
-      <EmptyState pose="thinking" title="Syncing your vault">
-        {session.syncStep}...
-      </EmptyState>
-    );
-  }
-  if (!session.auth) {
-    // Still loading, or it failed and the banner offers Try again.
-    return null;
-  }
-  if (!session.auth.signed_in) {
-    return (
-      <EmptyState
-        pose="neutral"
-        title="Let's get you set up"
-        action={
-          <button type="button" className="pf-btn pf-btn--primary" onClick={() => onNavigate("settings")}>
-            Open Settings
-          </button>
-        }
-      >
-        Add your Bungie app keys and sign in. Then sync, and ParaForge scores every weapon you own.
-      </EmptyState>
-    );
-  }
-  if (!session.syncedAt) {
-    return (
-      <EmptyState
-        pose="happy"
-        title="Ready when you are"
-        action={
-          <button type="button" className="pf-btn pf-btn--primary" onClick={session.sync}>
-            Sync now
-          </button>
-        }
-      >
-        Sync once to bring in your weapons. The first sync downloads Bungie's item database, so it takes a little
-        longer.
-      </EmptyState>
-    );
-  }
-  return (
-    <EmptyState
-      pose="happy"
-      title="Your vault is synced"
-      action={
-        <button type="button" className="pf-btn" onClick={() => onNavigate("vault")}>
-          Open Vault
-        </button>
-      }
-    >
-      {session.summary ? `${session.summary.copies} weapons scored. ` : ""}Your summary of new drops and chase-list
-      hits arrives here in a later build.
-    </EmptyState>
-  );
-}
 
 export function CodexPage() {
   return (
