@@ -27,7 +27,7 @@ jobs:
       - run: cargo test -p paraforge-core -p paraforge-bungie
 
   windows:
-    name: Windows app build
+    name: Windows app build and test installer
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,4 +42,11 @@ jobs:
       - run: pnpm audit --prod
       - run: pnpm typecheck
       - run: pnpm build
-      - run: cargo build -p paraforge
+      # A test installer (debug build, unsigned) that can be downloaded from the run's Artifacts.
+      - run: pnpm tauri build --debug --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ParaForge-test-installer-windows
+          path: target/debug/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
