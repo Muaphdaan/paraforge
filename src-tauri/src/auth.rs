@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use keyring_core::Entry;
 use paraforge_bungie::{
-    AppCredentials, AuthClient, AuthError, Callback, PendingSignIn, Secret, Tokens, resolve_callback,
+    AppCredentials, AuthClient, AuthError, Callback, PendingSignIn, Secret, Tokens, normalize_client_id,
+    resolve_callback,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
