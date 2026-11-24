@@ -16,13 +16,13 @@ pub struct WeaponHash(pub u32);
 #[serde(transparent)]
 pub struct PerkHash(pub u32);
 
-/// Gear tier, 1 to 5.
+/// Gear tier, 0 to 5. 0 means the weapon has no tier (most weapons from before tiers existed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
 pub struct Tier(u8);
 
 impl Tier {
-    pub const MIN: u8 = 1;
+    pub const MIN: u8 = 0;
     pub const MAX: u8 = 5;
 
     pub fn new(value: u8) -> Option<Self> {
@@ -38,7 +38,7 @@ impl TryFrom<u8> for Tier {
     type Error = String;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Tier::new(value).ok_or_else(|| format!("tier must be 1 to 5, got {value}"))
+        Tier::new(value).ok_or_else(|| format!("tier must be 0 to 5, got {value}"))
     }
 }
 
@@ -95,6 +95,9 @@ pub struct WeaponDef {
     pub type_name: String,
     /// The random-perk columns in socket order, for example barrel, magazine, trait, trait.
     pub columns: Vec<ColumnRole>,
+    /// The item socket index of each column, same length and order as `columns`.
+    #[serde(default)]
+    pub socket_indexes: Vec<u8>,
 }
 
 /// One column on an owned copy.
@@ -130,6 +133,15 @@ pub struct CuratedRoll {
     /// Accepted perks per column. An empty list means any perk is fine in that column.
     pub columns: Vec<Vec<PerkHash>>,
     pub curator: String,
+}
+
+/// A perk's display data from the manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerkInfo {
+    pub hash: PerkHash,
+    pub name: String,
+    /// Bungie's plug category identifier, for example "barrels" or "frames".
+    pub plug_category: String,
 }
 
 /// Provenance of a value, so the UI can badge it (official, community, ParaForge).

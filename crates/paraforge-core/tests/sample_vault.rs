@@ -40,6 +40,7 @@ fn def(hash: u32, name: &str, type_name: &str) -> WeaponDef {
         name: name.into(),
         type_name: type_name.into(),
         columns: vec![Barrel, Magazine, Trait, Trait],
+        socket_indexes: vec![1, 2, 3, 4],
     }
 }
 
@@ -222,7 +223,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 1);
+    assert_eq!(db.schema_version().unwrap(), 2);
 
     let defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     db.upsert_weapons(&defs).unwrap();
@@ -278,6 +279,23 @@ fn database_round_trip() {
     assert_eq!(db.copies().unwrap().len(), 7);
     assert!(db.scores(Context::Pve).unwrap().iter().all(|s| s.instance_id != "sv-3"));
 
+    let rows = db.vault_rows(Context::Pve).unwrap();
+    assert_eq!(rows.len(), 7);
+    assert_eq!(rows[0].name, "Night Ledger");
+    assert_eq!(rows[0].score.as_ref().unwrap().verdict, Verdict::Keep);
+
+    let perks =
+        [PerkInfo { hash: PerkHash(BARREL_GOOD), name: "Arrowhead Brake".into(), plug_category: "barrels".into() }];
+    db.replace_definitions(&defs, &perks).unwrap();
+    assert_eq!(db.perk_names().unwrap()[&PerkHash(BARREL_GOOD)], "Arrowhead Brake");
+    assert_eq!(db.weapons().unwrap(), f.defs);
+
+    // An untiered (legacy) copy is stored and scored at the bottom of the tier range.
+    let mut legacy = v.clone();
+    legacy[0].tier = Tier::new(0).unwrap();
+    db.replace_copies(&legacy, "2026-11-24T21:03:00Z").unwrap();
+    assert_eq!(db.copies().unwrap().iter().filter(|c| c.tier.get() == 0).count(), 1);
+
     db.set_meta("data_pack", "dev").unwrap();
     assert_eq!(db.meta("data_pack").unwrap().as_deref(), Some("dev"));
 }
@@ -292,7 +310,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 1);
+    assert_eq!(db.schema_version().unwrap(), 2);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

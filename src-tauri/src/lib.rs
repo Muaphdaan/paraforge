@@ -2,6 +2,7 @@
 //! allow-listed commands registered below; it never sees sign-in tokens or calls Bungie.
 
 mod auth;
+mod sync;
 
 use std::sync::Mutex;
 
@@ -9,8 +10,8 @@ use paraforge_core::{Context, CopyScore, Database, ScoringRules};
 use serde::Serialize;
 use tauri::{Manager, State};
 
-struct AppState {
-    db: Mutex<Database>,
+pub(crate) struct AppState {
+    pub(crate) db: Mutex<Database>,
 }
 
 #[derive(Serialize)]
@@ -74,6 +75,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db = Database::open(dir.join("paraforge.sqlite"))?;
             app.manage(AppState { db: Mutex::new(db) });
+            app.manage(sync::SyncState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -83,6 +85,9 @@ pub fn run() {
             auth::save_app_keys,
             auth::start_sign_in,
             auth::sign_out,
+            sync::sync_now,
+            sync::vault,
+            sync::perk_names,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
