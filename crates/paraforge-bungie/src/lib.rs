@@ -161,6 +161,38 @@ impl PendingSignIn {
     }
 }
 
+/// What to do with a `paraforge://` address, given the sign-in (if any) that is in progress.
+#[derive(Debug)]
+pub enum Callback {
+    /// The reply matches: exchange this code. The pending sign-in has been used up.
+    Code(Secret),
+    /// The reply matches but sign-in failed (refused, no code). The pending sign-in has been used up.
+    Failed(AuthError),
+    /// Not a reply to the sign-in in progress (wrong state, other link). The pending sign-in is kept.
+    Ignored(AuthError),
+    /// No sign-in is in progress.
+    NoneInProgress,
+}
+
+/// Checks a `paraforge://` address against the pending sign-in and only uses it up when the
+/// reply really belongs to it, so a stray or hostile link cannot cancel a real sign-in.
+pub fn resolve_callback(pending: &mut Option<PendingSignIn>, url: &str) -> Callback {
+    let Some(current) = pending.as_ref() else {
+        return Callback::NoneInProgress;
+    };
+    match current.accept(url) {
+        Ok(code) => {
+            *pending = None;
+            Callback::Code(code)
+        }
+        Err(e @ (AuthError::StateMismatch | AuthError::NotOurCallback)) => Callback::Ignored(e),
+        Err(e) => {
+            *pending = None;
+            Callback::Failed(e)
+        }
+    }
+}
+
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
@@ -318,6 +350,30 @@ mod tests {
         assert!(matches!(p.accept("https://evil.example/auth?code=X&state=abc"), Err(AuthError::NotOurCallback)));
         assert!(matches!(p.accept("paraforge://other?code=X&state=abc"), Err(AuthError::NotOurCallback)));
         assert!(matches!(p.accept("not a url"), Err(AuthError::NotOurCallback)));
+    }
+
+    #[test]
+    fn stray_links_do_not_cancel_the_real_sign_in() {
+        let mut pending = Some(PendingSignIn::with_state("1", "abc".into()));
+        assert!(matches!(resolve_callback(&mut pending, "paraforge://auth?code=X&state=zzz"), Callback::Ignored(_)));
+        assert!(matches!(resolve_callback(&mut pending, "paraforge://other"), Callback::Ignored(_)));
+        assert!(pending.is_some());
+        match resolve_callback(&mut pending, "paraforge://auth?code=REAL&state=abc") {
+            Callback::Code(code) => assert_eq!(code.expose(), "REAL"),
+            other => panic!("{other:?}"),
+        }
+        assert!(pending.is_none(), "a reply is used once");
+        assert!(matches!(
+            resolve_callback(&mut pending, "paraforge://auth?code=REAL&state=abc"),
+            Callback::NoneInProgress
+        ));
+
+        let mut pending = Some(PendingSignIn::with_state("1", "abc".into()));
+        assert!(matches!(
+            resolve_callback(&mut pending, "paraforge://auth?error=access_denied&state=abc"),
+            Callback::Failed(AuthError::Denied(_))
+        ));
+        assert!(pending.is_none());
     }
 
     #[test]

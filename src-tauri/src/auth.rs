@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use keyring_core::Entry;
-use paraforge_bungie::{AppCredentials, AuthClient, AuthError, PendingSignIn, Secret, Tokens};
+use paraforge_bungie::{
+    AppCredentials, AuthClient, AuthError, Callback, PendingSignIn, Secret, Tokens, resolve_callback,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -169,16 +171,20 @@ pub fn sign_out() -> Result<AuthStatus, String> {
 /// Handles a `paraforge://` address the OS hands to the app.
 pub fn handle_deep_link(app: &AppHandle, url: String) {
     let state = app.state::<AuthState>();
-    // Take the pending sign-in so a reply can only be used once.
-    let pending = state.pending.lock().ok().and_then(|mut p| p.take());
-    let Some(pending) = pending else {
-        let _ = app.emit("auth-error", "No sign-in was in progress. Please start sign-in from ParaForge.");
-        return;
+    let outcome = match state.pending.lock() {
+        Ok(mut pending) => resolve_callback(&mut pending, &url),
+        Err(_) => return,
     };
-    let code = match pending.accept(&url) {
-        Ok(code) => code,
-        Err(e) => {
+    let code = match outcome {
+        Callback::Code(code) => code,
+        Callback::Failed(e) => {
             let _ = app.emit("auth-error", e.to_string());
+            return;
+        }
+        // Not a reply to this sign-in: keep waiting for the real one. Never log the address, it may hold a code.
+        Callback::Ignored(_) => return,
+        Callback::NoneInProgress => {
+            let _ = app.emit("auth-error", "No sign-in was in progress. Please start sign-in from ParaForge.");
             return;
         }
     };

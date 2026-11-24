@@ -14,17 +14,18 @@ export function SignIn() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState(false);
 
   useEffect(() => {
     invoke<AuthStatus>("auth_status").then(setStatus, (e) => setMessage(String(e)));
     const unlisten = [
       listen<AuthStatus>("auth-changed", (e) => {
         setStatus(e.payload);
-        setBusy(false);
+        setWaiting(false);
         setMessage("Signed in.");
       }),
       listen<string>("auth-error", (e) => {
-        setBusy(false);
+        setWaiting(false);
         setMessage(e.payload);
       }),
     ];
@@ -56,9 +57,12 @@ export function SignIn() {
     setMessage("Finish signing in in your browser.");
     try {
       await invoke("start_sign_in");
+      setWaiting(true);
     } catch (e) {
-      setBusy(false);
       setMessage(String(e));
+    } finally {
+      // Only disabled while the browser is being opened; clicking again starts a fresh sign-in.
+      setBusy(false);
     }
   }
 
@@ -88,7 +92,7 @@ export function SignIn() {
         </>
       ) : status.has_app_keys ? (
         <button onClick={signIn} disabled={busy}>
-          Sign in with Bungie
+          {waiting ? "Start sign-in again" : "Sign in with Bungie"}
         </button>
       ) : null}
       <details open={!status.has_app_keys}>
