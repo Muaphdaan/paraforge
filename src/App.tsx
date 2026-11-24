@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { SignIn } from "./SignIn";
+import { Vault } from "./Vault";
 
 type AppInfo = {
   version: string;
@@ -13,6 +14,7 @@ type AppInfo = {
 function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
     invoke<AppInfo>("app_info").then(setInfo, (e) => setError(String(e)));
@@ -35,7 +37,8 @@ function App() {
           <dd>{info.ruleset}</dd>
         </dl>
       )}
-      <SignIn />
+      <SignIn onStatus={setSignedIn} />
+      <Vault signedIn={signedIn} />
     </main>
   );
 }

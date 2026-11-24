@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 base64 = "0.23"
 getrandom = "0.4"
+paraforge-core = { version = "0.1.0", path = "../paraforge-core" }
 reqwest = { version = "0.13", default-features = false, features = ["native-tls", "form", "json"] }
 serde.workspace = true
 serde_json.workspace = true

@@ -247,7 +247,8 @@ fn analyse<'a>(
         // No curated roll: stay neutral rather than punish the copy.
         None => perk_quality,
     };
-    let tier_factor = f64::from(copy.tier.get() - 1) / f64::from(crate::model::Tier::MAX - 1);
+    // Untiered (0) and tier 1 both count as the bottom of the range.
+    let tier_factor = f64::from(copy.tier.get().saturating_sub(1)) / f64::from(crate::model::Tier::MAX - 1);
     let enhanced_fraction = enhanced_roles.len() as f64 / n;
 
     let total_w = rules.w_perks + rules.w_roll + rules.w_tier + rules.w_masterwork + rules.w_enhanced;

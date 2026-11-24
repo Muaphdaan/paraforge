@@ -10,7 +10,7 @@ type AuthStatus = {
   sign_in_expires_at: number | null;
 };
 
-export function SignIn() {
+export function SignIn({ onStatus }: { onStatus?: (signedIn: boolean) => void }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,6 +74,10 @@ export function SignIn() {
       setMessage(String(e));
     }
   }
+
+  useEffect(() => {
+    onStatus?.(Boolean(status?.signed_in));
+  }, [status, onStatus]);
 
   if (!status) return <p>{message ?? "Checking sign-in..."}</p>;
 

@@ -8,7 +8,7 @@ pub mod model;
 pub mod rules;
 pub mod score;
 
-pub use db::{Database, DbError};
+pub use db::{Database, DbError, VaultRow};
 pub use model::*;
 pub use rules::{PerkRatings, ScoringRules};
 pub use score::{CopyScore, MissingPiece, Reason, RollMatch, ScoreError, VaultScores, Verdict, score_vault};

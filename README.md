@@ -9,7 +9,7 @@ Work in progress. The interface is unstyled until the design system is locked.
 | Path | What it is |
 | --- | --- |
 | `crates/paraforge-core` | Data model, local SQLite database and scoring engine. No UI, no network; builds and tests on any OS. |
-| `crates/paraforge-bungie` | Bungie.net client: OAuth sign-in for a private Confidential app and token refresh. |
+| `crates/paraforge-bungie` | Bungie.net client: OAuth sign-in and token refresh, platform API calls, and parsing of manifest definitions and profiles into the core model. |
 | `src-tauri` | The Tauri 2 desktop shell. Exposes a short allow-list of commands to the interface. |
 | `src` | The React + TypeScript interface. |
 
@@ -32,6 +32,14 @@ OAuth client type **Confidential**, redirect URL `paraforge://auth`, scopes "Rea
 information" and "Move or equip Destiny gear". The app asks for its API key, client id and client
 secret on first launch and keeps them, with the sign-in tokens, in Windows Credential Manager.
 They never reach the interface or any file.
+
+## Vault sync
+
+**Sync with Bungie** downloads Bungie's item definitions (only when Bungie publishes a new
+manifest), reads every owned weapon from the vault, characters and equipped slots, stores the
+copies locally and scores them for PvE and PvP. Perk columns come from the weapon's WEAPON PERKS
+sockets; enhanced perks are stored as their normal perk with an `enhanced` flag, using
+d2-additional-info's mapping (see `crates/paraforge-bungie/data/NOTICE.md`).
 
 ## Scoring
 

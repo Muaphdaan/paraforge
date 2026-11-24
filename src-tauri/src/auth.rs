@@ -213,8 +213,7 @@ pub fn handle_deep_link(app: &AppHandle, url: String) {
     });
 }
 
-/// A valid access token for Bungie API calls, refreshed if needed. Used by the sync (next step).
-#[allow(dead_code)]
+/// A valid access token for Bungie API calls, refreshed if needed.
 pub async fn access_token(state: &AuthState) -> Result<(AppCredentials, Tokens), String> {
     let _guard = state.refresh_lock.lock().await;
     let keys = load::<AppCredentials>(APP_KEYS)?.ok_or("Add your Bungie app keys first.")?;
