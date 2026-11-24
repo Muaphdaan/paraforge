@@ -311,6 +311,25 @@ pub struct RawProfile {
     pub item_components: RawItemComponents,
 }
 
+impl RawProfile {
+    /// Parts of the profile that Bungie left out. Storing a profile with any of these missing
+    /// would look like the player had deleted weapons, so the sync refuses it instead.
+    pub fn missing_parts(&self) -> Vec<&'static str> {
+        let c = &self.item_components;
+        [
+            ("vault", self.profile_inventory.data.is_none()),
+            ("character inventories", self.character_inventories.data.is_none()),
+            ("equipped items", self.character_equipment.data.is_none()),
+            ("item details", c.instances.data.is_none()),
+            ("equipped perks", c.sockets.data.is_none()),
+            ("selectable perks", c.reusable_plugs.data.is_none()),
+        ]
+        .into_iter()
+        .filter_map(|(name, missing)| missing.then_some(name))
+        .collect()
+    }
+}
+
 /// Owned weapons read from a profile, plus what could not be read.
 #[derive(Debug, Default, PartialEq)]
 pub struct ProfileWeapons {
@@ -568,5 +587,7 @@ mod tests {
         assert!(out.characters_hidden);
         assert!(out.copies.is_empty());
         assert_eq!(out.unreadable, vec!["6917530166076737087".to_string()]);
+        assert_eq!(p.missing_parts(), vec!["character inventories", "equipped perks"]);
+        assert!(fixture().missing_parts().is_empty());
     }
 }

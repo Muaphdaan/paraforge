@@ -128,16 +128,28 @@ impl UserMemberships {
     /// The Destiny account to sync: the cross-save primary if there is one, otherwise the first
     /// account that is not overridden by cross save.
     pub fn choose(&self) -> Option<&DestinyMembership> {
+        self.candidates().into_iter().next()
+    }
+
+    /// Destiny accounts worth trying, best first: the cross-save primary, then accounts that cross
+    /// save does not override, in Bungie's order. Without cross save, a player can have several
+    /// accounts (for example an old Stadia one), and only the profile request shows which one has
+    /// Destiny 2 data, so the sync tries them in turn.
+    pub fn candidates(&self) -> Vec<&DestinyMembership> {
         let real = |m: &&DestinyMembership| m.membership_type > 0 && m.membership_type < 20;
+        let mut out: Vec<&DestinyMembership> = Vec::new();
         if let Some(primary) = &self.primary_membership_id
             && let Some(m) = self.destiny_memberships.iter().filter(real).find(|m| &m.membership_id == primary)
         {
-            return Some(m);
+            out.push(m);
         }
-        self.destiny_memberships
-            .iter()
-            .filter(real)
-            .find(|m| m.cross_save_override == 0 || m.cross_save_override == m.membership_type)
+        for m in self.destiny_memberships.iter().filter(real) {
+            let own = m.cross_save_override == 0 || m.cross_save_override == m.membership_type;
+            if own && !out.iter().any(|o| o.membership_id == m.membership_id) {
+                out.push(m);
+            }
+        }
+        out
     }
 }
 
@@ -171,8 +183,13 @@ impl BungieApi {
 
     /// For tests against a local server.
     pub fn with_urls(app: &AppCredentials, platform_url: &str, content_url: &str) -> Result<Self, ApiError> {
-        let http =
-            reqwest::Client::builder().user_agent(USER_AGENT).connect_timeout(Duration::from_secs(20)).build()?;
+        // read_timeout is per read, so a slow but steady manifest download is never cut off,
+        // while a stalled connection fails after a minute.
+        let http = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(Duration::from_secs(20))
+            .read_timeout(Duration::from_secs(60))
+            .build()?;
         Ok(Self {
             http,
             api_key: app.api_key.clone(),
@@ -217,25 +234,28 @@ impl BungieApi {
         if !content_path.starts_with('/') || content_path.contains("..") {
             return Err(ApiError::BadReply(format!("unexpected manifest path {content_path:?}")));
         }
-        let mut resp = self
-            .http
-            .get(format!("{}{content_path}", self.content_url))
-            .header("X-API-Key", self.api_key.expose())
-            .timeout(Duration::from_secs(600))
-            .send()
-            .await?;
+        // No total timeout: the item table is over 100 MB and may take a long time on a slow
+        // connection. The client's read timeout catches a stalled download.
+        let mut resp = self.http.get(format!("{}{content_path}", self.content_url)).send().await?;
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
             return Err(ApiError::Http(status));
         }
         let partial = dest.with_extension("part");
-        let mut file = std::io::BufWriter::new(std::fs::File::create(&partial)?);
-        while let Some(chunk) = resp.chunk().await? {
-            file.write_all(&chunk)?;
+        let result: Result<(), ApiError> = async {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&partial)?);
+            while let Some(chunk) = resp.chunk().await? {
+                file.write_all(&chunk)?;
+            }
+            file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+            std::fs::rename(&partial, dest)?;
+            Ok(())
         }
-        file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
-        std::fs::rename(&partial, dest)?;
-        Ok(())
+        .await;
+        if result.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        result
     }
 }
 
@@ -276,6 +296,24 @@ mod tests {
             "ErrorCode":1,"ThrottleSeconds":0,"ErrorStatus":"Success","Message":"Ok"}"#;
         let m: UserMemberships = parse_envelope(200, single).unwrap();
         assert_eq!(m.choose().unwrap().membership_id, "4611686018400000009");
+
+        // No cross save, two accounts of their own: both are tried, in Bungie's order.
+        let two = br#"{"Response":{"destinyMemberships":[
+            {"membershipType":5,"membershipId":"4611686018400000005","displayName":"Stadia","crossSaveOverride":0},
+            {"membershipType":3,"membershipId":"4611686018400000003","displayName":"Steam","crossSaveOverride":0},
+            {"membershipType":2,"membershipId":"4611686018400000002","displayName":"PS","crossSaveOverride":3}]},
+            "ErrorCode":1,"ThrottleSeconds":0,"ErrorStatus":"Success","Message":"Ok"}"#;
+        let m: UserMemberships = parse_envelope(200, two).unwrap();
+        let types: Vec<i32> = m.candidates().iter().map(|c| c.membership_type).collect();
+        assert_eq!(types, vec![5, 3]);
+
+        // The cross-save primary comes first and is not repeated.
+        let body = br#"{"Response":{"destinyMemberships":[
+            {"membershipType":3,"membershipId":"4611686018400000003","displayName":"Steam","crossSaveOverride":3},
+            {"membershipType":2,"membershipId":"4611686018400000002","displayName":"PS","crossSaveOverride":3}],
+            "primaryMembershipId":"4611686018400000003"},"ErrorCode":1,"ThrottleSeconds":0,"ErrorStatus":"Success","Message":"Ok"}"#;
+        let m: UserMemberships = parse_envelope(200, body).unwrap();
+        assert_eq!(m.candidates().len(), 1);
 
         let none = br#"{"Response":{"destinyMemberships":[]},"ErrorCode":1,"ThrottleSeconds":0,"ErrorStatus":"Success","Message":"Ok"}"#;
         assert!(parse_envelope::<UserMemberships>(200, none).unwrap().choose().is_none());

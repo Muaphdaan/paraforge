@@ -9,7 +9,7 @@ publish.workspace = true
 base64 = "0.23"
 getrandom = "0.4"
 paraforge-core = { version = "0.1.0", path = "../paraforge-core" }
-reqwest = { version = "0.13", default-features = false, features = ["native-tls", "form", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "form", "json", "gzip"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

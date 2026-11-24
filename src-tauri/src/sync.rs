@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use paraforge_bungie::api::{ApiError, BungieApi};
+use paraforge_bungie::api::{ApiError, BungieApi, DestinyMembership};
+use paraforge_bungie::inventory::RawProfile;
 use paraforge_bungie::inventory::{EnhancedPerks, RawItemDef, RawPlugSetDef, build_catalog, read_profile};
 use paraforge_core::{Context, ScoringRules, VaultRow, score_vault};
 use serde::Serialize;
@@ -83,7 +84,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let _guard = RunningGuard(&sync.running);
 
     progress(&app, "Checking your Bungie sign-in");
-    let (keys, tokens) = auth::access_token(&app.state::<AuthState>()).await?;
+    let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
     let api = BungieApi::new(&keys).map_err(api_err)?;
 
     // 1. Item definitions, downloaded again only when Bungie publishes a new manifest.
@@ -103,39 +104,57 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         let dir = manifest_dir(&app)?;
         let items_file = dir.join("items.json");
         let sets_file = dir.join("plugsets.json");
-        api.download_table(&items_path, &items_file).await.map_err(api_err)?;
-        api.download_table(&sets_path, &sets_file).await.map_err(api_err)?;
+        let downloaded = match api.download_table(&items_path, &items_file).await {
+            Ok(()) => api.download_table(&sets_path, &sets_file).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = downloaded {
+            let _ = std::fs::remove_file(&items_file);
+            let _ = std::fs::remove_file(&sets_file);
+            return Err(api_err(e));
+        }
 
         progress(&app, "Reading Bungie's item database");
         let app2 = app.clone();
         let enhanced2 = enhanced.clone();
-        let count = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
+        let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let items: HashMap<String, RawItemDef> = read_table(&items_file)?;
             let sets: HashMap<String, RawPlugSetDef> = read_table(&sets_file)?;
             let catalog = build_catalog(&items, &sets, &enhanced2);
             drop(items);
+            // Check before writing, so a changed format never wipes the weapons already stored.
+            if catalog.weapons.is_empty() {
+                return Err("No weapons were found in Bungie's item database; the format may have changed.".into());
+            }
             let state = app2.state::<AppState>();
             let mut db = state.db.lock().map_err(|e| e.to_string())?;
             db.replace_definitions(&catalog.weapons, &catalog.perks).map_err(|e| e.to_string())?;
             db.set_meta(META_MANIFEST, &wanted).map_err(|e| e.to_string())?;
             db.set_meta("manifest_version", &manifest.version).map_err(|e| e.to_string())?;
-            Ok(catalog.weapons.len())
+            Ok(())
         })
         .await
-        .map_err(|e| e.to_string())??;
-        if count == 0 {
-            return Err("No weapons were found in Bungie's item database; the format may have changed.".into());
-        }
-        // The raw tables are large and no longer needed.
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        // The raw tables are large and no longer needed, whether or not reading them worked.
         let _ = std::fs::remove_file(dir.join("items.json"));
         let _ = std::fs::remove_file(dir.join("plugsets.json"));
+        result?;
     }
 
     // 2. The player's weapons.
     progress(&app, "Reading your vault and characters");
-    let memberships = api.memberships(&tokens.access_token).await.map_err(api_err)?;
-    let account = memberships.choose().ok_or_else(|| ApiError::NoDestinyAccount.to_string())?.clone();
-    let profile = api.profile(&tokens.access_token, &account).await.map_err(api_err)?;
+    let profile = read_player(&app, &api).await?;
+    let missing = profile.missing_parts();
+    if !missing.is_empty() {
+        // Storing a partial profile would look like deleted weapons, so keep the last good sync.
+        return Err(format!(
+            "Bungie did not send your full inventory (missing: {}). Your last sync is kept. On \
+             bungie.net, check that your ParaForge app has the \"Read your Destiny 2 information \
+             (Vault, Inventory, and Vendors)\" scope, then sign out of ParaForge and sign in again.",
+            missing.join(", ")
+        ));
+    }
 
     // 3. Store and score.
     progress(&app, "Scoring your weapons");
@@ -166,6 +185,34 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         manifest_version,
         synced_at,
     })
+}
+
+/// Fetches the player's profile. The access token is fetched again here because the manifest
+/// download can outlast it; if Bungie still rejects it, it is refreshed once and the call retried.
+async fn read_player(app: &AppHandle, api: &BungieApi) -> Result<RawProfile, String> {
+    let auth_state = app.state::<AuthState>();
+    let (_, tokens) = auth::access_token(&auth_state).await?;
+    match profile_for(api, &tokens).await {
+        Err(ApiError::SignInRequired) => {
+            let (_, fresh) = auth::refresh_after_rejection(&auth_state, &tokens).await?;
+            profile_for(api, &fresh).await.map_err(api_err)
+        }
+        other => other.map_err(api_err),
+    }
+}
+
+/// The profile of the player's Destiny account. Without cross save a player can have several
+/// accounts, so each candidate is tried until one has Destiny 2 data.
+async fn profile_for(api: &BungieApi, tokens: &paraforge_bungie::Tokens) -> Result<RawProfile, ApiError> {
+    let memberships = api.memberships(&tokens.access_token).await?;
+    let candidates: Vec<DestinyMembership> = memberships.candidates().into_iter().cloned().collect();
+    for account in &candidates {
+        match api.profile(&tokens.access_token, account).await {
+            Err(ApiError::NoDestinyAccount) => continue,
+            other => return other,
+        }
+    }
+    Err(ApiError::NoDestinyAccount)
 }
 
 /// The stored vault for one context ("pve" or "pvp"), best first.

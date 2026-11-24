@@ -215,10 +215,21 @@ pub fn handle_deep_link(app: &AppHandle, url: String) {
 
 /// A valid access token for Bungie API calls, refreshed if needed.
 pub async fn access_token(state: &AuthState) -> Result<(AppCredentials, Tokens), String> {
+    token_with_refresh(state, None).await
+}
+
+/// A new access token after Bungie rejected `rejected` early (it was revoked or the clock is off).
+/// If another call already refreshed it, that newer token is returned instead.
+pub async fn refresh_after_rejection(state: &AuthState, rejected: &Tokens) -> Result<(AppCredentials, Tokens), String> {
+    token_with_refresh(state, Some(rejected)).await
+}
+
+async fn token_with_refresh(state: &AuthState, rejected: Option<&Tokens>) -> Result<(AppCredentials, Tokens), String> {
     let _guard = state.refresh_lock.lock().await;
     let keys = load::<AppCredentials>(APP_KEYS)?.ok_or("Add your Bungie app keys first.")?;
     let tokens = load_tokens()?.ok_or("Please sign in to Bungie.")?;
-    if tokens.access_valid(now()) {
+    let rejected_this_one = rejected.is_some_and(|r| r.access_token.expose() == tokens.access_token.expose());
+    if tokens.access_valid(now()) && !rejected_this_one {
         return Ok((keys, tokens));
     }
     match state.client.refresh(&keys, &tokens, now()).await {

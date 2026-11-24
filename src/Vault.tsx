@@ -1,5 +1,5 @@
 // Unstyled vault list and Sync button for the code track. Styling comes with the design system.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -39,11 +39,27 @@ export function Vault({ signedIn }: { signedIn: boolean }) {
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    invoke<VaultRow[]>("vault", { context }).then(setRows, (e) => setError(String(e)));
-  }, [context]);
+  // The context shown now, and a counter so only the newest load updates the table. Without them,
+  // a sync that ends after the context changed would show the old context's rows.
+  const contextRef = useRef(context);
+  const loadSeq = useRef(0);
 
-  useEffect(load, [load]);
+  const load = useCallback(() => {
+    const seq = ++loadSeq.current;
+    invoke<VaultRow[]>("vault", { context: contextRef.current }).then(
+      (r) => {
+        if (seq === loadSeq.current) setRows(r);
+      },
+      (e) => {
+        if (seq === loadSeq.current) setError(String(e));
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    contextRef.current = context;
+    load();
+  }, [context, load]);
 
   useEffect(() => {
     const unlisten = listen<string>("sync-progress", (e) => setStep(e.payload));
