@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   core:
-    name: Core tests
+    name: Core and Bungie tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,8 +23,8 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy -p paraforge-core --all-targets -- -D warnings
-      - run: cargo test -p paraforge-core
+      - run: cargo clippy -p paraforge-core -p paraforge-bungie --all-targets -- -D warnings
+      - run: cargo test -p paraforge-core -p paraforge-bungie
 
   windows:
     name: Windows app build

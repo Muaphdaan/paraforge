@@ -9,6 +9,7 @@ Work in progress. The interface is unstyled until the design system is locked.
 | Path | What it is |
 | --- | --- |
 | `crates/paraforge-core` | Data model, local SQLite database and scoring engine. No UI, no network; builds and tests on any OS. |
+| `crates/paraforge-bungie` | Bungie.net client: OAuth sign-in for a private Confidential app and token refresh. |
 | `src-tauri` | The Tauri 2 desktop shell. Exposes a short allow-list of commands to the interface. |
 | `src` | The React + TypeScript interface. |
 
@@ -23,6 +24,14 @@ cargo test -p paraforge-core    # core tests
 ```
 
 New npm package versions are only installed once they are 7 days old (`pnpm-workspace.yaml`).
+
+## Bungie sign-in
+
+ParaForge signs in through your own private Bungie app (bungie.net/en/Application):
+OAuth client type **Confidential**, redirect URL `paraforge://auth`, scopes "Read your Destiny 2
+information" and "Move or equip Destiny gear". The app asks for its API key, client id and client
+secret on first launch and keeps them, with the sign-in tokens, in Windows Credential Manager.
+They never reach the interface or any file.
 
 ## Scoring
 

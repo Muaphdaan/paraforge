@@ -1,6 +1,7 @@
 // Placeholder screen for the code track. No visual styling until the design spec is locked.
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { SignIn } from "./SignIn";
 
 type AppInfo = {
   version: string;
@@ -34,6 +35,7 @@ function App() {
           <dd>{info.ruleset}</dd>
         </dl>
       )}
+      <SignIn />
     </main>
   );
 }
