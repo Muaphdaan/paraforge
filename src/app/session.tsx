@@ -20,6 +20,8 @@ type Session = {
   /** The current step while a sync runs, otherwise null. */
   syncStep: string | null;
   syncError: string | null;
+  /** The error came from an automatic sync: shown in the header and sidebar, not as a banner. */
+  syncErrorAuto: boolean;
   clearSyncError: () => void;
   sync: () => Promise<void>;
   /** Bumped after every successful sync, so lists know to reload. */
@@ -65,6 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const [syncStep, setSyncStep] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncErrorAuto, setSyncErrorAuto] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
   const [context, setContext] = useState<ScoreContext>("pve");
   const running = useRef(false);
@@ -75,6 +78,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [autoSync, setAutoSyncState] = useState(readAutoSync);
   // When the last sync was started (ms), so a failing auto sync waits a full interval before retrying.
   const lastAttempt = useRef(0);
+  // Automatic failures in a row; each one doubles the wait before the next automatic try.
+  const autoFailures = useRef(0);
   const [infoLoaded, setInfoLoaded] = useState(false);
 
   // Reload the vault for the current context after each sync; only the newest reply counts.
@@ -104,7 +109,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setSyncedAt(i.synced_at);
         setInfoLoaded(true);
       },
-      (e) => setSyncError(String(e)),
+      (e) => {
+        setSyncError(String(e));
+        // Without a stored sync time, auto sync treats the vault as due and tries on launch.
+        setInfoLoaded(true);
+      },
     );
     const unlisten = [
       listen<string>("sync-progress", (e) => {
@@ -132,19 +141,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(refreshAuth, [refreshAuth]);
 
-  const sync = useCallback(async () => {
+  const runSync = useCallback(async (auto: boolean) => {
     if (running.current) return;
     running.current = true;
     lastAttempt.current = Date.now();
-    setSyncError(null);
+    // A manual sync starts clean; an automatic one leaves any error up until it succeeds.
+    if (!auto) {
+      setSyncError(null);
+      setSyncErrorAuto(false);
+    }
     setSyncStep("Starting");
     try {
       const result = await invoke<SyncSummary>("sync_now");
       setSummary(result);
       setSyncedAt(result.synced_at);
       setDataVersion((v) => v + 1);
+      setSyncError(null);
+      setSyncErrorAuto(false);
+      setInfoLoaded(true);
+      autoFailures.current = 0;
     } catch (e) {
+      if (auto) autoFailures.current += 1;
       setSyncError(String(e));
+      setSyncErrorAuto(auto);
       // A refused sign-in shows up here first; refresh the status so the banner is right.
       invoke<AuthStatus>("auth_status").then(setAuth, () => {});
     } finally {
@@ -152,6 +171,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSyncStep(null);
     }
   }, []);
+  // Buttons pass their click event; this wrapper keeps it from being read as `auto`.
+  const sync = useCallback(() => runSync(false), [runSync]);
 
   const setAutoSync = useCallback((minutes: number) => {
     setAutoSyncState(minutes);
@@ -170,13 +191,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const interval = autoSync * 60_000;
     const check = () => {
       const now = Date.now();
-      const syncedMs = (syncedAt ?? 0) * 1000;
-      if (now - syncedMs >= interval && now - lastAttempt.current >= interval) void sync();
+      // A time in the future (the clock was set back) counts as long ago.
+      const since = (ms: number) => (ms > now ? Infinity : now - ms);
+      // Back off after automatic failures (2x, 4x... up to a day), so a broken sync does not
+      // download Bungie's item database again every few minutes.
+      const wait = Math.min(interval * 2 ** autoFailures.current, 24 * 3_600_000);
+      if (since((syncedAt ?? 0) * 1000) >= interval && since(lastAttempt.current) >= wait) void runSync(true);
     };
     check();
     const timer = window.setInterval(check, 60_000);
     return () => window.clearInterval(timer);
-  }, [canSync, autoSync, syncedAt, sync]);
+  }, [canSync, autoSync, syncedAt, runSync]);
 
   const value: Session = {
     info,
@@ -189,6 +214,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     summary,
     syncStep,
     syncError,
+    syncErrorAuto,
     clearSyncError: useCallback(() => setSyncError(null), []),
     sync,
     dataVersion,

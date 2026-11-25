@@ -105,7 +105,7 @@ function Banners({ page, onNavigate }: { page: PageId; onNavigate: (page: PageId
   const signedIn = Boolean(session.auth?.signed_in);
   return (
     <>
-      {session.syncError && (
+      {session.syncError && !session.syncErrorAuto && (
         <Banner
           tone="error"
           onDismiss={session.clearSyncError}
