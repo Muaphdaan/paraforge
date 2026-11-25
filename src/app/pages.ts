@@ -1,6 +1,6 @@
 import { BookOpen, SquareCheckBig, Home, Layers, LucideIcon, Archive, Settings } from "lucide-react";
 
-export type PageId = "home" | "vault" | "codex" | "chase" | "collections" | "settings";
+export type PageId = "home" | "vault" | "codex" | "chase" | "collections" | "settings" | "weapon";
 
 export type PageDef = {
   id: PageId;
@@ -53,6 +53,15 @@ export const PAGES: Record<PageId, PageDef> = {
     group: "Progress",
     title: "Collections",
     subtitle: "How close you are to owning it all.",
+  },
+  // Not in the sidebar: opened from the Vault. The header shows the weapon's own name.
+  weapon: {
+    id: "weapon",
+    label: "Vault",
+    icon: Archive,
+    group: "Armoury",
+    title: "Weapon",
+    subtitle: "",
   },
   settings: {
     id: "settings",

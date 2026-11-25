@@ -197,3 +197,72 @@ export function Dropdown<T extends string>(props: {
     </div>
   );
 }
+
+/** An on/off switch with a label and an optional description. */
+export function Toggle(props: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  description?: ReactNode;
+  disabled?: boolean;
+}) {
+  const descId = useId();
+  return (
+    <label className="pf-toggle" data-disabled={props.disabled || undefined}>
+      <input
+        type="checkbox"
+        role="switch"
+        className="pf-toggle__input"
+        checked={props.checked}
+        disabled={props.disabled}
+        aria-describedby={props.description ? descId : undefined}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+      <span className="pf-toggle__track" aria-hidden="true">
+        <span className="pf-toggle__thumb" />
+      </span>
+      <span className="pf-toggle__text">
+        <span className="pf-toggle__label">{props.label}</span>
+        {props.description && (
+          <span className="pf-toggle__desc" id={descId}>
+            {props.description}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
+
+/** A read-only value with a Copy button, for things like the redirect URL. */
+export function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const id = useId();
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+  return (
+    <div className="pf-field">
+      <label className="pf-field__label" htmlFor={id}>
+        {label}
+      </label>
+      <div className="pf-copyfield">
+        <input id={id} className="pf-input" value={value} readOnly onFocus={(e) => e.currentTarget.select()} />
+        <button
+          type="button"
+          className="pf-btn pf-btn--small"
+          onClick={() =>
+            navigator.clipboard.writeText(value).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            )
+          }
+        >
+          {copied ? <Check size={14} aria-hidden="true" /> : null}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}

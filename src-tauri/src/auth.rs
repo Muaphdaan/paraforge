@@ -170,6 +170,13 @@ pub fn start_sign_in(app: AppHandle, state: State<'_, AuthState>) -> Result<(), 
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Opens Bungie's application portal, where the player creates their private ParaForge app.
+/// The address is fixed here, so the interface cannot open arbitrary links.
+#[tauri::command]
+pub fn open_bungie_apps(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url("https://www.bungie.net/en/Application", None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn sign_out(state: State<'_, AuthState>) -> Result<AuthStatus, String> {
     // Wait for any token refresh in flight, so it cannot sign the user back in afterwards.

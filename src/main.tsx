@@ -7,6 +7,7 @@ import "./styles/base.css";
 import "./styles/ui.css";
 import "./styles/shell.css";
 import "./styles/vault.css";
+import "./styles/pages.css";
 import App from "./App";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

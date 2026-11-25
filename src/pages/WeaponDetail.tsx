@@ -1,6 +1,6 @@
 // The detail panel for one owned copy, in the spirit of light.gg: screenshot banner, the facts,
 // the score with its reasons, every perk column with icons, and your other copies of the weapon.
-import { Check, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Lock, Sparkles } from "lucide-react";
 import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "../app/api";
 import { TierPill, VerdictPill } from "../ui/parts";
 import { AmmoBadge, BungieImage, ElementBadge, PerkIcon } from "../ui/weapon";
@@ -11,6 +11,7 @@ export function WeaponDetail(props: {
   perks: Record<number, Perk>;
   context: ScoreContext;
   onSelect: (instanceId: string) => void;
+  onOpen: () => void;
 }) {
   const { row, perks } = props;
   const exotic = row.look.rarity === 6;
@@ -58,6 +59,11 @@ export function WeaponDetail(props: {
             </span>
           )}
         </div>
+
+        <button type="button" className="pf-btn pf-btn--primary pf-detail__open" onClick={props.onOpen}>
+          Open weapon page
+          <ArrowRight size={16} aria-hidden="true" />
+        </button>
 
         {row.score ? (
           <div className="pf-detail__score">

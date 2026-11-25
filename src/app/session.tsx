@@ -33,21 +33,55 @@ type Session = {
   vaultError: string | null;
   /** Every known perk by hash, with its icon and description. */
   perks: Record<number, Perk>;
-  /** Minutes between automatic syncs; 0 turns auto sync off. */
-  autoSync: number;
-  setAutoSync: (minutes: number) => void;
+  syncPrefs: SyncPrefs;
+  setSyncPrefs: (prefs: SyncPrefs) => void;
+  /** Destiny 2 is running and "sync while I play" is on, so syncs come every 2 minutes. */
+  playing: boolean;
 };
 
-const AUTO_SYNC_KEY = "paraforge.autoSync";
-export const AUTO_SYNC_DEFAULT = 15;
+export type SyncPrefs = {
+  /** Minutes between automatic syncs; 0 turns the schedule off. */
+  interval: number;
+  /** Sync when ParaForge starts (unless it synced in the last 2 minutes). */
+  onStart: boolean;
+  /** Sync every 2 minutes while Destiny 2 is running. */
+  whilePlaying: boolean;
+};
 
-function readAutoSync(): number {
+export const PLAYING_INTERVAL_MIN = 2;
+
+const SYNC_PREFS_KEY = "paraforge.syncPrefs";
+/** The first auto sync setting, kept so an existing choice carries over. */
+const OLD_AUTO_SYNC_KEY = "paraforge.autoSync";
+const CONTEXT_KEY = "paraforge.context";
+export const SYNC_DEFAULTS: SyncPrefs = { interval: 15, onStart: true, whilePlaying: true };
+
+function readSyncPrefs(): SyncPrefs {
   try {
-    const stored = localStorage.getItem(AUTO_SYNC_KEY);
-    const minutes = stored === null ? AUTO_SYNC_DEFAULT : Number(stored);
-    return Number.isFinite(minutes) && minutes >= 0 ? minutes : AUTO_SYNC_DEFAULT;
+    const stored = localStorage.getItem(SYNC_PREFS_KEY);
+    if (stored) {
+      const p = JSON.parse(stored) as Partial<SyncPrefs>;
+      return {
+        interval: typeof p.interval === "number" && p.interval >= 0 ? p.interval : SYNC_DEFAULTS.interval,
+        onStart: typeof p.onStart === "boolean" ? p.onStart : SYNC_DEFAULTS.onStart,
+        whilePlaying: typeof p.whilePlaying === "boolean" ? p.whilePlaying : SYNC_DEFAULTS.whilePlaying,
+      };
+    }
+    const old = localStorage.getItem(OLD_AUTO_SYNC_KEY);
+    if (old !== null && Number.isFinite(Number(old)) && Number(old) >= 0) {
+      return { ...SYNC_DEFAULTS, interval: Number(old) };
+    }
   } catch {
-    return AUTO_SYNC_DEFAULT;
+    // Unreadable storage: use the defaults.
+  }
+  return SYNC_DEFAULTS;
+}
+
+function readContext(): ScoreContext {
+  try {
+    return localStorage.getItem(CONTEXT_KEY) === "pvp" ? "pvp" : "pve";
+  } catch {
+    return "pve";
   }
 }
 
@@ -69,13 +103,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncErrorAuto, setSyncErrorAuto] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
-  const [context, setContext] = useState<ScoreContext>("pve");
+  const [context, setContextState] = useState<ScoreContext>(readContext);
+  const setContext = useCallback((next: ScoreContext) => {
+    setContextState(next);
+    try {
+      localStorage.setItem(CONTEXT_KEY, next);
+    } catch {
+      // Without storage the choice lasts until the app closes.
+    }
+  }, []);
   const running = useRef(false);
   const [loaded, setLoaded] = useState<{ context: ScoreContext; rows: VaultRow[] } | null>(null);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [perks, setPerks] = useState<Record<number, Perk>>({});
   const loadSeq = useRef(0);
-  const [autoSync, setAutoSyncState] = useState(readAutoSync);
+  const [syncPrefs, setSyncPrefsState] = useState(readSyncPrefs);
+  const [playing, setPlaying] = useState(false);
+  const startChecked = useRef(false);
   // When the last sync was started (ms), so a failing auto sync waits a full interval before retrying.
   const lastAttempt = useRef(0);
   // Automatic failures in a row; each one doubles the wait before the next automatic try.
@@ -102,6 +146,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     invoke<Record<number, Perk>>("perks").then(setPerks, () => setPerks({}));
   }, [dataVersion]);
 
+  // App info (player name, counts, rules); read again after every sync so Settings stays current.
   useEffect(() => {
     invoke<AppInfo>("app_info").then(
       (i) => {
@@ -110,11 +155,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setInfoLoaded(true);
       },
       (e) => {
-        setSyncError(String(e));
+        if (dataVersion === 0) setSyncError(String(e));
         // Without a stored sync time, auto sync treats the vault as due and tries on launch.
         setInfoLoaded(true);
       },
     );
+  }, [dataVersion]);
+
+  useEffect(() => {
     const unlisten = [
       listen<string>("sync-progress", (e) => {
         if (running.current) setSyncStep(e.payload);
@@ -174,34 +222,53 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Buttons pass their click event; this wrapper keeps it from being read as `auto`.
   const sync = useCallback(() => runSync(false), [runSync]);
 
-  const setAutoSync = useCallback((minutes: number) => {
-    setAutoSyncState(minutes);
+  const setSyncPrefs = useCallback((prefs: SyncPrefs) => {
+    setSyncPrefsState(prefs);
     try {
-      localStorage.setItem(AUTO_SYNC_KEY, String(minutes));
+      localStorage.setItem(SYNC_PREFS_KEY, JSON.stringify(prefs));
     } catch {
       // Without storage the choice lasts until the app closes.
     }
   }, []);
 
-  // Auto sync: on launch when the last sync is older than the interval, then whenever it comes due.
-  // Checked every minute, so a sleeping PC catches up soon after it wakes.
+  // Auto sync, checked every minute (so a PC waking from sleep catches up soon after):
+  // - when ParaForge starts, if "sync when ParaForge starts" is on;
+  // - every 2 minutes while Destiny 2 runs, if "sync while I play" is on;
+  // - otherwise on the chosen schedule.
   const canSync = Boolean(auth?.signed_in) && infoLoaded;
   useEffect(() => {
-    if (!canSync || autoSync <= 0) return;
-    const interval = autoSync * 60_000;
-    const check = () => {
+    if (!canSync) return;
+    let cancelled = false;
+    const check = async () => {
+      const isPlaying = syncPrefs.whilePlaying ? await invoke<boolean>("game_running").catch(() => false) : false;
+      if (cancelled) return;
+      setPlaying(isPlaying);
       const now = Date.now();
       // A time in the future (the clock was set back) counts as long ago.
       const since = (ms: number) => (ms > now ? Infinity : now - ms);
+      const sinceSync = since((syncedAt ?? 0) * 1000);
+      if (!startChecked.current) {
+        startChecked.current = true;
+        if (syncPrefs.onStart && sinceSync >= PLAYING_INTERVAL_MIN * 60_000) {
+          void runSync(true);
+          return;
+        }
+      }
+      const minutes = isPlaying ? PLAYING_INTERVAL_MIN : syncPrefs.interval;
+      if (minutes <= 0) return;
+      const interval = minutes * 60_000;
       // Back off after automatic failures (2x, 4x... up to a day), so a broken sync does not
       // download Bungie's item database again every few minutes.
       const wait = Math.min(interval * 2 ** autoFailures.current, 24 * 3_600_000);
-      if (since((syncedAt ?? 0) * 1000) >= interval && since(lastAttempt.current) >= wait) void runSync(true);
+      if (sinceSync >= interval && since(lastAttempt.current) >= wait) void runSync(true);
     };
-    check();
-    const timer = window.setInterval(check, 60_000);
-    return () => window.clearInterval(timer);
-  }, [canSync, autoSync, syncedAt, runSync]);
+    void check();
+    const timer = window.setInterval(() => void check(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [canSync, syncPrefs, syncedAt, runSync]);
 
   const value: Session = {
     info,
@@ -224,8 +291,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     vault: loaded && loaded.context === context ? loaded.rows : null,
     vaultError,
     perks,
-    autoSync,
-    setAutoSync,
+    syncPrefs,
+    setSyncPrefs,
+    playing,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

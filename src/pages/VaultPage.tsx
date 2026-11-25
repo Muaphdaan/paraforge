@@ -97,9 +97,11 @@ function matches(row: VaultRow, words: string[], perks: Record<number, Perk>): b
 export function VaultPage({
   onNavigate,
   initialSelectedId = null,
+  onOpenWeapon,
 }: {
   onNavigate: (page: PageId) => void;
   initialSelectedId?: string | null;
+  onOpenWeapon: (instanceId: string) => void;
 }) {
   const session = useSession();
   const [prefs, setPrefs] = useState(readPrefs);
@@ -336,6 +338,7 @@ export function VaultPage({
           perks={session.perks}
           context={session.context}
           onSelect={setSelectedId}
+          onOpen={() => onOpenWeapon(selected.instance_id)}
         />
       )}
     </div>

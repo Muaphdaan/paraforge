@@ -310,13 +310,6 @@
 }
 
 /* Page layouts */
-.pf-settings {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: var(--gap);
-  align-content: start;
-}
-
 .pf-vault__toolbar {
   display: flex;
   flex-wrap: wrap;

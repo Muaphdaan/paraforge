@@ -118,6 +118,7 @@ pub fn run() {
             auth::auth_status,
             auth::save_app_keys,
             auth::start_sign_in,
+            auth::open_bungie_apps,
             auth::sign_out,
             sync::sync_now,
             sync::vault,

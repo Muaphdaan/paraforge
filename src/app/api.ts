@@ -5,6 +5,21 @@ export type AppInfo = {
   schema_version: number;
   ruleset: string;
   synced_at: number | null;
+  /** The player's Bungie Name from the last sync, for example "NightOwl#4821". */
+  player: string | null;
+  manifest_version: string | null;
+  weapons_known: number;
+  perks_known: number;
+  copies: number;
+  rules: ScoringRules;
+};
+
+export type ScoringRules = {
+  ruleset: string;
+  keep_at: number;
+  shard_below: number;
+  duplicate_margin: number;
+  [weight: string]: number | string;
 };
 
 export type AuthStatus = {
@@ -27,6 +42,7 @@ export type SyncSummary = {
 export type Verdict = "keep" | "upgrade" | "replace" | "shard";
 
 export type CopyScore = {
+  instance_id: string;
   score: number;
   potential: number;
   confidence: number;
@@ -66,7 +82,69 @@ export type VaultRow = {
   look: WeaponLook;
   roles: ColumnRole[];
   columns: CopyColumn[];
+  /** Stat values by Bungie stat hash. */
+  stats: Record<string, number>;
+  location: CopyLocation;
 };
+
+export type CopyLocation = "vault" | "inventory" | "equipped";
+
+export const LOCATION_LABEL: Record<CopyLocation, string> = {
+  vault: "Vault",
+  inventory: "On a character",
+  equipped: "Equipped",
+};
+
+/** One weapon's definition, from the `weapon` command. */
+export type WeaponDef = {
+  hash: number;
+  name: string;
+  type_name: string;
+  columns: ColumnRole[];
+  look: WeaponLook;
+  /** Every perk that can currently roll in each column, same order as `columns`. */
+  pools: number[][];
+};
+
+/**
+ * Weapon stats in the order DIM and the game show them, by Bungie stat hash.
+ * `bar: false` stats are counts or times, shown as a number only.
+ */
+export const WEAPON_STATS: { hash: number; name: string; bar: boolean }[] = [
+  { hash: 4284893193, name: "RPM", bar: false },
+  { hash: 2961396640, name: "Charge time", bar: false },
+  { hash: 447667954, name: "Draw time", bar: false },
+  { hash: 4043523819, name: "Impact", bar: true },
+  { hash: 3614673599, name: "Blast radius", bar: true },
+  { hash: 2523465841, name: "Velocity", bar: true },
+  { hash: 1240592695, name: "Range", bar: true },
+  { hash: 1591432999, name: "Accuracy", bar: true },
+  { hash: 1842278586, name: "Shield duration", bar: true },
+  { hash: 155624089, name: "Stability", bar: true },
+  { hash: 943549884, name: "Handling", bar: true },
+  { hash: 4188031367, name: "Reload speed", bar: true },
+  { hash: 2837207746, name: "Swing speed", bar: true },
+  { hash: 3022301683, name: "Charge rate", bar: true },
+  { hash: 209426660, name: "Guard resistance", bar: true },
+  { hash: 2762071195, name: "Guard efficiency", bar: true },
+  { hash: 3736848092, name: "Guard endurance", bar: true },
+  { hash: 3085395333, name: "Persistence", bar: true },
+  { hash: 3481294762, name: "Heat generated", bar: true },
+  { hash: 4006394725, name: "Cooling efficiency", bar: true },
+  { hash: 602570185, name: "Vent speed", bar: true },
+  { hash: 1345609583, name: "Aim assistance", bar: true },
+  { hash: 2714457168, name: "Airborne effectiveness", bar: true },
+  { hash: 3555269338, name: "Zoom", bar: false },
+  { hash: 2715839340, name: "Recoil direction", bar: true },
+  { hash: 1931675084, name: "Ammo generation", bar: true },
+  { hash: 3871231066, name: "Magazine", bar: false },
+  { hash: 925767036, name: "Ammo capacity", bar: false },
+];
+
+/** "High", "Medium" or "Low", from a score's 0 to 1 confidence. */
+export function confidenceLabel(confidence: number): string {
+  return confidence >= 0.8 ? "High" : confidence >= 0.5 ? "Medium" : "Low";
+}
 
 export type Perk = {
   hash: number;

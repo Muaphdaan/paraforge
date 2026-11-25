@@ -1,37 +1,63 @@
-import { CloudCheck, CloudOff, RefreshCw } from "lucide-react";
+import { CloudCheck, CloudOff, RefreshCw, Search } from "lucide-react";
 import { CONTEXTS } from "../app/api";
 import { PAGES, PageId } from "../app/pages";
 import { useSession } from "../app/session";
 import { timeAgo, useNow } from "../app/time";
 import { Dropdown, Sparkle } from "../ui/parts";
 
-export function Header(props: { page: PageId; canGoBack: boolean; onBack: () => void }) {
+export function Header(props: {
+  page: PageId;
+  canGoBack: boolean;
+  onBack: () => void;
+  /** Breadcrumb trail after the group, for example ["Vault", "Static Verdict"]. */
+  crumbs?: string[];
+  title?: string;
+  subtitle?: string;
+  onSearch: () => void;
+}) {
   const def = PAGES[props.page];
   const session = useSession();
+  const crumbs = props.crumbs ?? [def.label];
   return (
     <header className="pf-header">
       <div className="pf-header__lead">
         {(props.canGoBack || def.group) && (
-        <div className="pf-header__trail">
-          {props.canGoBack && (
-            <button type="button" className="pf-btn pf-btn--primary pf-btn--small" onClick={props.onBack} title="Back (Alt+Left)">
-              Back
-            </button>
-          )}
-          {def.group && (
-            <nav className="pf-crumbs" aria-label="Breadcrumb">
-              {def.group} / <span aria-current="page">{def.id === "settings" ? "Account" : def.label}</span>
-            </nav>
-          )}
-        </div>
+          <div className="pf-header__trail">
+            {props.canGoBack && (
+              <button
+                type="button"
+                className="pf-btn pf-btn--primary pf-btn--small"
+                onClick={props.onBack}
+                title="Back (Alt+Left)"
+              >
+                Back
+              </button>
+            )}
+            {def.group && (
+              <nav className="pf-crumbs" aria-label="Breadcrumb">
+                {def.group}
+                {crumbs.map((c, i) => (
+                  <span key={i}>
+                    {" / "}
+                    <span aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c}</span>
+                  </span>
+                ))}
+              </nav>
+            )}
+          </div>
         )}
         <h1 className="pf-header__title">
-          <span>{def.title}</span>
+          <span>{props.title ?? def.title}</span>
           <Sparkle size={22} />
         </h1>
-        <p className="pf-header__subtitle">{def.subtitle}</p>
+        <p className="pf-header__subtitle">{props.subtitle ?? def.subtitle}</p>
       </div>
       <div className="pf-header__tools">
+        <button type="button" className="pf-searchbtn" onClick={props.onSearch} aria-keyshortcuts="Control+K">
+          <Search size={18} aria-hidden="true" />
+          <span>Search weapons and perks</span>
+          <kbd>Ctrl K</kbd>
+        </button>
         <Dropdown label="Score context" value={session.context} options={CONTEXTS} onChange={session.setContext} />
         <SyncStatus />
       </div>
