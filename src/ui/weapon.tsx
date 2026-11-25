@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Circle, Hexagon, Lock, Snowflake, Spline, Sun, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AMMO, ELEMENTS, Perk, VaultRow, bungieImage } from "../app/api";
+import { AMMO, CopyPart, ELEMENTS, PartKind, Perk, VaultRow, WeaponPart, bungieImage } from "../app/api";
 
 const ELEMENT_ICONS: Record<number, LucideIcon> = {
   1: Circle,
@@ -150,5 +150,84 @@ export function PerkIcon(props: {
     >
       {props.perk?.icon ? <BungieImage path={props.perk.icon} className="pf-perk__icon" /> : null}
     </span>
+  );
+}
+
+const PART_LABEL: Record<PartKind, string> = {
+  intrinsic: "Frame",
+  origin: "Origin trait",
+  masterwork: "Masterwork",
+  mod: "Mod",
+  catalyst: "Catalyst",
+};
+
+const PART_EMPTY: Record<PartKind, string> = {
+  intrinsic: "None",
+  origin: "None",
+  masterwork: "Not masterworked",
+  mod: "No mod",
+  catalyst: "No catalyst yet",
+};
+
+/** One part as shown: its kind and the perks in it (both options for a two-choice origin trait). */
+export type ShownPart = { kind: PartKind; perks: number[]; /** The perk that is enhanced, if any. */ enhanced?: number };
+
+/** A copy's frame, origin trait, masterwork, mod and catalyst. */
+export function copyParts(parts: CopyPart[] | undefined): ShownPart[] {
+  return (parts ?? []).map((p) => ({
+    kind: p.kind,
+    perks: p.options.length > 0 ? p.options : p.plugged !== null ? [p.plugged] : [],
+    enhanced: p.enhanced && p.plugged !== null ? p.plugged : undefined,
+  }));
+}
+
+/** What every copy of a weapon gets: its frame and origin trait. Masterwork and mod are your pick. */
+export function weaponParts(parts: WeaponPart[] | undefined): ShownPart[] {
+  return (parts ?? [])
+    .filter((p) => p.kind === "intrinsic" || p.kind === "origin")
+    .map((p) => ({ kind: p.kind, perks: p.pool.filter((h) => !p.empty.includes(h)) }));
+}
+
+/** The non-column parts of a weapon, one row each, in the same panel style as the perk columns. */
+export function PartList(props: {
+  parts: ShownPart[];
+  perks: Record<number, Perk>;
+  exotic?: boolean;
+  size?: number;
+  /** Show each perk's description under its name. */
+  describe?: boolean;
+}) {
+  if (props.parts.length === 0) return null;
+  return (
+    <div className="pf-perkcols pf-parts">
+      {props.parts.map((part, i) => {
+        const label = part.kind === "intrinsic" && props.exotic ? "Intrinsic" : PART_LABEL[part.kind];
+        return (
+          <div key={i} className="pf-perkcol" role="group" aria-label={label}>
+            <div className="pf-perkcol__label">{label}</div>
+            {part.perks.length === 0 ? (
+              <span className="pf-muted">{PART_EMPTY[part.kind]}</span>
+            ) : (
+              part.perks.map((hash) => {
+                const perk = props.perks[hash];
+                const enhanced = part.enhanced === hash;
+                return (
+                  <div key={hash} className="pf-perkrow">
+                    <PerkIcon hash={hash} perk={perk} enhanced={enhanced} size={props.size ?? 34} decorative />
+                    <span className="pf-perkrow__name">
+                      {perk?.name ?? "Unknown perk"}
+                      {enhanced && <span className="pf-perkrow__enh">Enhanced</span>}
+                      {props.describe && perk?.description && (
+                        <span className="pf-part__desc">{perk.description}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

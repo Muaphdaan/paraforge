@@ -18,7 +18,7 @@ import {
 } from "../app/api";
 import { useSession } from "../app/session";
 import { EmptyState, TierPill, useCopy, VerdictPill } from "../ui/parts";
-import { AmmoBadge, BungieImage, ElementBadge, PerkIcon } from "../ui/weapon";
+import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
 
 type ScoreMap = Record<string, CopyScore>;
 
@@ -262,6 +262,7 @@ function PerksCard(props: { row: VaultRow; def: WeaponDef | null | undefined; pe
           </ul>
         </>
       )}
+      <PartList parts={copyParts(row.parts)} perks={perks} exotic={row.look.rarity === 6} size={36} describe />
     </section>
   );
 }

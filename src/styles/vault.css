@@ -675,6 +675,16 @@
   font-weight: 600;
 }
 
+.pf-part__desc {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.pf-parts { margin-top: var(--space-3); }
+
 .pf-perkrow__enh {
   padding: 0 7px;
   border-radius: var(--radius-pill);

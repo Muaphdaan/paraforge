@@ -87,6 +87,51 @@ pub enum ColumnRole {
     Trait,
 }
 
+/// A fixed part of a weapon that is not a random-perk column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PartKind {
+    /// The intrinsic frame, for example "Adaptive Frame", or an exotic's intrinsic perk.
+    Intrinsic,
+    /// The origin trait, for example "Veist Stinger".
+    Origin,
+    /// A legendary's masterwork (the stat it boosts).
+    Masterwork,
+    /// The weapon mod slot.
+    Mod,
+    /// An exotic's catalyst slot.
+    Catalyst,
+}
+
+/// One part socket on a weapon definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeaponPart {
+    pub kind: PartKind,
+    /// The item socket index.
+    pub socket_index: u8,
+    /// What this socket can hold on any copy. Filled for intrinsics and origin traits; masterwork,
+    /// mod and catalyst options are the same on every weapon of a type, so they stay empty here.
+    #[serde(default)]
+    pub pool: Vec<PerkHash>,
+    /// Placeholder plugs that mean the socket is empty ("Empty Mod Socket").
+    #[serde(default)]
+    pub empty: Vec<PerkHash>,
+}
+
+/// One part on an owned copy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CopyPart {
+    pub kind: PartKind,
+    /// What is in the socket now, `None` when it is empty.
+    pub plugged: Option<PerkHash>,
+    /// Whether the plugged perk is the enhanced version (enhanced origin traits on Tier 5 drops).
+    #[serde(default)]
+    pub enhanced: bool,
+    /// Every option the player can switch to in this socket (origin traits with two choices).
+    #[serde(default)]
+    pub options: Vec<PerkHash>,
+}
+
 /// One weapon in the game (manifest data, trimmed to what the core needs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeaponDef {
@@ -105,6 +150,9 @@ pub struct WeaponDef {
     /// Every perk that can currently roll in each column (base versions), same order as `columns`.
     #[serde(default)]
     pub pools: Vec<Vec<PerkHash>>,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst sockets, in socket order.
+    #[serde(default)]
+    pub parts: Vec<WeaponPart>,
 }
 
 /// Display data for a weapon, from Bungie's item definitions.
@@ -161,6 +209,9 @@ pub struct WeaponCopy {
     pub stats: BTreeMap<u32, i32>,
     #[serde(default)]
     pub location: CopyLocation,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst, same order as [`WeaponDef::parts`].
+    #[serde(default)]
+    pub parts: Vec<CopyPart>,
 }
 
 /// Where an owned copy is.

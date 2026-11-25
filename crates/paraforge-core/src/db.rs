@@ -9,8 +9,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
 use crate::model::{
-    ColumnRole, Context, CopyColumn, CopyLocation, CuratedRoll, PerkHash, PerkInfo, Provenance, Tier, WeaponCopy,
-    WeaponDef, WeaponHash, WeaponLook,
+    ColumnRole, Context, CopyColumn, CopyLocation, CopyPart, CuratedRoll, PerkHash, PerkInfo, Provenance, Tier,
+    WeaponCopy, WeaponDef, WeaponHash, WeaponLook, WeaponPart,
 };
 use crate::rules::PerkRatings;
 use crate::score::CopyScore;
@@ -160,16 +160,23 @@ const MIGRATIONS: &[&str] = &[
         added       TEXT NOT NULL
     );
     "#,
+    // 6: intrinsic, origin trait, masterwork, mod and catalyst sockets, on weapons and copies
+    r#"
+    ALTER TABLE weapon ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE weapon_copy ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
+    "#,
 ];
 
-const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools";
+const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools, parts";
 
-fn weapon_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(u32, String, String, String, String, String, String)> {
-    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+type WeaponRow = (u32, String, String, String, String, String, String, String);
+
+fn weapon_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WeaponRow> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
 }
 
-fn parse_weapon(row: (u32, String, String, String, String, String, String)) -> Result<WeaponDef> {
-    let (hash, name, type_name, columns, sockets, look, pools) = row;
+fn parse_weapon(row: WeaponRow) -> Result<WeaponDef> {
+    let (hash, name, type_name, columns, sockets, look, pools, parts) = row;
     Ok(WeaponDef {
         hash: WeaponHash(hash),
         name,
@@ -178,6 +185,7 @@ fn parse_weapon(row: (u32, String, String, String, String, String, String)) -> R
         socket_indexes: serde_json::from_str(&sockets)?,
         look: serde_json::from_str::<WeaponLook>(&look)?,
         pools: serde_json::from_str(&pools)?,
+        parts: serde_json::from_str(&parts)?,
     })
 }
 
@@ -248,11 +256,11 @@ impl Database {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools, parts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(hash) DO UPDATE SET name = excluded.name, type_name = excluded.type_name,
                      columns = excluded.columns, socket_indexes = excluded.socket_indexes, look = excluded.look,
-                     pools = excluded.pools",
+                     pools = excluded.pools, parts = excluded.parts",
             )?;
             for w in weapons {
                 stmt.execute(params![
@@ -262,7 +270,8 @@ impl Database {
                     serde_json::to_string(&w.columns)?,
                     serde_json::to_string(&w.socket_indexes)?,
                     serde_json::to_string(&w.look)?,
-                    serde_json::to_string(&w.pools)?
+                    serde_json::to_string(&w.pools)?,
+                    serde_json::to_string(&w.parts)?
                 ])?;
             }
         }
@@ -305,7 +314,7 @@ impl Database {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {WEAPON_COLUMNS}, (SELECT COUNT(*) FROM weapon_copy c WHERE c.weapon_hash = weapon.hash) FROM weapon"
         ))?;
-        let rows = stmt.query_map([], |r| Ok((weapon_from_row(r)?, r.get::<_, i64>(7)?)))?;
+        let rows = stmt.query_map([], |r| Ok((weapon_from_row(r)?, r.get::<_, i64>(8)?)))?;
         let mut out = Vec::new();
         for row in rows {
             let (raw, owned) = row?;
@@ -320,6 +329,7 @@ impl Database {
                 look: def.look,
                 roles: def.columns,
                 pools: def.pools,
+                parts: def.parts,
                 owned: owned as u32,
             });
         }
@@ -401,8 +411,8 @@ impl Database {
         {
             let mut insert = tx.prepare(
                 "INSERT INTO weapon_copy(instance_id, weapon_hash, tier, columns, masterworked, locked, synced_at,
-                     stats, location)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                     stats, location, parts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
             let mut stale = tx.prepare("DELETE FROM copy_score WHERE instance_id = ?1")?;
             for c in copies {
@@ -420,7 +430,8 @@ impl Database {
                     c.locked,
                     synced_at,
                     serde_json::to_string(&c.stats)?,
-                    c.location.as_str()
+                    c.location.as_str(),
+                    serde_json::to_string(&c.parts)?
                 ])?;
             }
         }
@@ -432,7 +443,7 @@ impl Database {
 
     pub fn copies(&self) -> Result<Vec<WeaponCopy>> {
         let mut stmt = self.conn.prepare(
-            "SELECT instance_id, weapon_hash, tier, columns, masterworked, locked, stats, location
+            "SELECT instance_id, weapon_hash, tier, columns, masterworked, locked, stats, location, parts
              FROM weapon_copy ORDER BY instance_id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -445,11 +456,12 @@ impl Database {
                 r.get::<_, bool>(5)?,
                 r.get::<_, String>(6)?,
                 r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (instance_id, weapon, tier, columns, masterworked, locked, stats, location) = row?;
+            let (instance_id, weapon, tier, columns, masterworked, locked, stats, location, parts) = row?;
             let tier = Tier::new(tier).ok_or_else(|| DbError::Corrupt(format!("tier {tier} on {instance_id}")))?;
             let columns: Vec<CopyColumn> = serde_json::from_str(&columns)?;
             out.push(WeaponCopy {
@@ -461,6 +473,7 @@ impl Database {
                 locked,
                 stats: serde_json::from_str(&stats)?,
                 location: CopyLocation::parse(&location),
+                parts: serde_json::from_str(&parts)?,
             });
         }
         Ok(out)
@@ -580,8 +593,8 @@ impl Database {
         tx.execute("DELETE FROM perk", [])?;
         {
             let mut w = tx.prepare(
-                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools, parts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for d in weapons {
                 w.execute(params![
@@ -591,7 +604,8 @@ impl Database {
                     serde_json::to_string(&d.columns)?,
                     serde_json::to_string(&d.socket_indexes)?,
                     serde_json::to_string(&d.look)?,
-                    serde_json::to_string(&d.pools)?
+                    serde_json::to_string(&d.pools)?,
+                    serde_json::to_string(&d.parts)?
                 ])?;
             }
             let mut p = tx.prepare(
@@ -630,7 +644,7 @@ impl Database {
     pub fn vault_rows(&self, context: Context) -> Result<Vec<VaultRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.instance_id, c.weapon_hash, w.name, w.type_name, c.tier, c.masterworked, c.locked, s.detail,
-                    w.look, w.columns, c.columns, c.stats, c.location
+                    w.look, w.columns, c.columns, c.stats, c.location, c.parts
              FROM weapon_copy c
              JOIN weapon w ON w.hash = c.weapon_hash
              LEFT JOIN copy_score s ON s.instance_id = c.instance_id AND s.context = ?1
@@ -651,6 +665,7 @@ impl Database {
                 r.get::<_, String>(10)?,
                 r.get::<_, String>(11)?,
                 r.get::<_, String>(12)?,
+                r.get::<_, String>(13)?,
             ))
         })?;
         let mut out = Vec::new();
@@ -669,6 +684,7 @@ impl Database {
                 columns,
                 stats,
                 location,
+                parts,
             ) = row?;
             out.push(VaultRow {
                 instance_id,
@@ -684,6 +700,7 @@ impl Database {
                 columns: serde_json::from_str(&columns)?,
                 stats: serde_json::from_str(&stats)?,
                 location: CopyLocation::parse(&location),
+                parts: serde_json::from_str(&parts)?,
             });
         }
         Ok(out)
@@ -715,6 +732,8 @@ pub struct CodexRow {
     pub roles: Vec<ColumnRole>,
     /// Every perk that can currently roll in each column.
     pub pools: Vec<Vec<PerkHash>>,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst sockets.
+    pub parts: Vec<WeaponPart>,
     /// Copies the player owns.
     pub owned: u32,
 }
@@ -738,6 +757,8 @@ pub struct VaultRow {
     /// Stat values by Bungie stat hash.
     pub stats: std::collections::BTreeMap<u32, i32>,
     pub location: CopyLocation,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst on this copy.
+    pub parts: Vec<CopyPart>,
 }
 
 fn parse_context(value: &str) -> Result<Context> {

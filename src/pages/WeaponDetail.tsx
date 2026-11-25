@@ -3,7 +3,7 @@
 import { ArrowRight, Check, Lock, Sparkles } from "lucide-react";
 import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "../app/api";
 import { TierPill, VerdictPill } from "../ui/parts";
-import { AmmoBadge, BungieImage, ElementBadge, PerkIcon } from "../ui/weapon";
+import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
 
 export function WeaponDetail(props: {
   row: VaultRow;
@@ -113,6 +113,8 @@ export function WeaponDetail(props: {
             ))}
           </div>
         )}
+
+        <PartList parts={copyParts(row.parts)} perks={perks} exotic={row.look.rarity === 6} size={30} />
 
         {copies.length > 1 && (
           <>

@@ -25,7 +25,7 @@ const COLLECTIBLES_TABLE: &str = "DestinyCollectibleDefinition";
 const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
-const CATALOG_VERSION: &str = "catalog-4";
+const CATALOG_VERSION: &str = "catalog-5";
 
 #[derive(Default)]
 pub struct SyncState {

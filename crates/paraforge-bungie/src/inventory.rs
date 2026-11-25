@@ -6,7 +6,8 @@
 use std::collections::{HashMap, HashSet};
 
 use paraforge_core::{
-    ColumnRole, CopyColumn, CopyLocation, PerkHash, PerkInfo, Tier, WeaponCopy, WeaponDef, WeaponHash, WeaponLook,
+    ColumnRole, CopyColumn, CopyLocation, CopyPart, PartKind, PerkHash, PerkInfo, Tier, WeaponCopy, WeaponDef,
+    WeaponHash, WeaponLook, WeaponPart,
 };
 use serde::Deserialize;
 
@@ -20,6 +21,12 @@ const ICH_DUMMIES: u32 = 3_109_687_656;
 const ICH_ORIGIN_TRAITS: u32 = 2_779_167_812;
 /// SocketCategory "WEAPON PERKS".
 const SOCKET_CATEGORY_WEAPON_PERKS: u32 = 4_241_085_061;
+/// SocketCategory "INTRINSIC TRAITS" (the frame, or an exotic's intrinsic perk).
+const SOCKET_CATEGORY_INTRINSIC: u32 = 3_956_125_808;
+/// SocketCategory "WEAPON MODS" (mod, masterwork, catalyst).
+const SOCKET_CATEGORY_WEAPON_MODS: u32 = 2_685_412_949;
+/// Bungie TierType of Exotic items.
+const RARITY_EXOTIC: u8 = 6;
 /// Socket types that sit in the perk category but are not perk columns: kill tracker, masterwork.
 const SOCKET_TYPES_NOT_COLUMNS: [u32; 2] = [1_282_012_138, 2_218_962_841];
 
@@ -273,6 +280,65 @@ fn column_role(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Option<Col
     }
 }
 
+/// Weapon mod plug categories: `v400.weapon.mod_guns`, `v400.weapon.mod_empty`, `v460.weapon.mod_sword`...
+fn is_mod_category(category: &str) -> bool {
+    category.contains("weapon.mod_")
+}
+
+/// Masterwork and catalyst plug categories (`v400.plugs.weapons.masterworks.stat.range`,
+/// `v400.empty.exotic.masterwork`, per-exotic `...masterwork`), but not kill trackers or effects.
+fn is_masterwork_category(category: &str) -> bool {
+    category == "catalysts"
+        || (category.contains("masterwork")
+            && !category.contains("trackers")
+            && !category.contains("toggle_vfx")
+            && !category.contains("ghost"))
+}
+
+/// What a non-column socket is, from the plugs it can hold.
+fn part_kind(plugs: &[u32], items: &HashMap<String, RawItemDef>, exotic: bool) -> Option<PartKind> {
+    let mut found: Option<PartKind> = None;
+    let rank = |k: PartKind| match k {
+        PartKind::Origin => 0,
+        PartKind::Intrinsic => 1,
+        PartKind::Catalyst | PartKind::Masterwork => 2,
+        PartKind::Mod => 3,
+    };
+    for hash in plugs {
+        let Some(def) = items.get(&hash.to_string()) else { continue };
+        let category = def.plug.as_ref().map(|p| p.plug_category_identifier.as_str()).unwrap_or("");
+        let kind = if def.item_category_hashes.contains(&ICH_ORIGIN_TRAITS) || category == "origins" {
+            PartKind::Origin
+        } else if category == "intrinsics" {
+            PartKind::Intrinsic
+        } else if is_masterwork_category(category) {
+            if exotic { PartKind::Catalyst } else { PartKind::Masterwork }
+        } else if is_mod_category(category) {
+            PartKind::Mod
+        } else {
+            continue;
+        };
+        if found.is_none_or(|f| rank(kind) < rank(f)) {
+            found = Some(kind);
+        }
+    }
+    found
+}
+
+/// Plugs that stand for an empty socket ("Empty Mod Socket", "Empty Catalyst Socket").
+fn empty_plugs(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Vec<PerkHash> {
+    plugs
+        .iter()
+        .filter(|h| {
+            items.get(&h.to_string()).is_some_and(|d| {
+                d.plug.as_ref().is_some_and(|p| p.plug_category_identifier.contains("empty"))
+                    || d.display_properties.name.starts_with("Empty ")
+            })
+        })
+        .map(|h| PerkHash(*h))
+        .collect()
+}
+
 /// Builds the weapon catalog from the `DestinyInventoryItemDefinition`, `DestinyPlugSetDefinition` and
 /// `DestinyCollectibleDefinition` tables (each a JSON object keyed by hash).
 pub fn build_catalog(
@@ -287,24 +353,51 @@ pub fn build_catalog(
         let mut columns = Vec::new();
         let mut socket_indexes = Vec::new();
         let mut pools = Vec::new();
-        let perk_category = item.sockets.as_ref().and_then(|sockets| {
-            let category =
-                sockets.socket_categories.iter().find(|c| c.socket_category_hash == SOCKET_CATEGORY_WEAPON_PERKS)?;
-            Some((sockets, category))
-        });
-        if let Some((sockets, category)) = perk_category {
-            for &index in &category.socket_indexes {
+        let mut parts = Vec::new();
+        let exotic = item.inventory.tier_type == RARITY_EXOTIC;
+        if let Some(sockets) = &item.sockets {
+            let mut indexes: Vec<(u32, i32)> = sockets
+                .socket_categories
+                .iter()
+                .filter(|c| {
+                    [SOCKET_CATEGORY_INTRINSIC, SOCKET_CATEGORY_WEAPON_PERKS, SOCKET_CATEGORY_WEAPON_MODS]
+                        .contains(&c.socket_category_hash)
+                })
+                .flat_map(|c| c.socket_indexes.iter().map(move |i| (c.socket_category_hash, *i)))
+                .collect();
+            indexes.sort_by_key(|(_, i)| *i);
+            indexes.dedup_by_key(|(_, i)| *i);
+            for (category, index) in indexes {
                 let Ok(index_u8) = u8::try_from(index) else { continue };
                 let Some(entry) = sockets.socket_entries.get(index_u8 as usize) else { continue };
-                if entry.socket_type_hash == 0 || SOCKET_TYPES_NOT_COLUMNS.contains(&entry.socket_type_hash) {
+                if entry.socket_type_hash == 0 {
                     continue;
                 }
                 let plugs = candidate_plugs(entry, plug_sets);
-                if let Some(role) = column_role(&plugs, items) {
+                let column = (category == SOCKET_CATEGORY_WEAPON_PERKS
+                    && !SOCKET_TYPES_NOT_COLUMNS.contains(&entry.socket_type_hash))
+                .then(|| column_role(&plugs, items))
+                .flatten();
+                if let Some(role) = column {
                     columns.push(role);
                     socket_indexes.push(index_u8);
                     pools.push(column_pool(entry, plug_sets, enhanced));
                     perk_hashes.extend(plugs.iter().map(|p| enhanced.base(*p)));
+                } else if let Some(kind) = part_kind(&plugs, items, exotic) {
+                    perk_hashes.extend(plugs.iter().map(|p| enhanced.base(*p)));
+                    let pool = match kind {
+                        PartKind::Intrinsic | PartKind::Origin => {
+                            let mut pool: Vec<PerkHash> = Vec::new();
+                            for p in plugs.iter().map(|p| PerkHash(enhanced.base(*p))) {
+                                if !pool.contains(&p) {
+                                    pool.push(p);
+                                }
+                            }
+                            pool
+                        }
+                        _ => Vec::new(),
+                    };
+                    parts.push(WeaponPart { kind, socket_index: index_u8, pool, empty: empty_plugs(&plugs, items) });
                 }
             }
         }
@@ -317,7 +410,18 @@ pub fn build_catalog(
             socket_indexes,
             look: look(item, collectibles),
             pools,
+            parts,
         });
+    }
+    // Every mod, masterwork and catalyst plug, since a copy can hold one its definition does not list.
+    for (key, def) in items {
+        let Some(plug) = &def.plug else { continue };
+        let category = plug.plug_category_identifier.as_str();
+        if (is_mod_category(category) || is_masterwork_category(category))
+            && let Ok(hash) = key.parse::<u32>()
+        {
+            perk_hashes.insert(hash);
+        }
     }
     for hash in perk_hashes {
         if let Some(def) = items.get(&hash.to_string()) {
@@ -558,6 +662,30 @@ fn read_copy(
     if def.socket_indexes.len() != def.columns.len() {
         return None;
     }
+    let parts = def
+        .parts
+        .iter()
+        .map(|part| {
+            let raw = sockets.sockets.get(part.socket_index as usize).and_then(|s| s.plug_hash).filter(|h| *h != 0);
+            let plugged = raw.filter(|h| !part.empty.contains(&PerkHash(*h)));
+            let mut options: Vec<PerkHash> = Vec::new();
+            if part.kind == PartKind::Origin {
+                let listed = reusable.and_then(|r| r.plugs.get(&part.socket_index.to_string()));
+                for p in listed.into_iter().flatten().map(|p| p.plug_item_hash).chain(plugged) {
+                    let base = PerkHash(enhanced.base(p));
+                    if p != 0 && !options.contains(&base) {
+                        options.push(base);
+                    }
+                }
+            }
+            CopyPart {
+                kind: part.kind,
+                plugged: plugged.map(|h| PerkHash(enhanced.base(h))),
+                enhanced: plugged.is_some_and(|h| enhanced.is_enhanced(h)),
+                options,
+            }
+        })
+        .collect();
     Some(WeaponCopy {
         instance_id: id.to_string(),
         weapon: def.hash,
@@ -573,6 +701,7 @@ fn read_copy(
             .map(|s| s.stats.values().map(|stat| (stat.stat_hash, stat.value)).collect())
             .unwrap_or_default(),
         location: CopyLocation::Vault,
+        parts,
     })
 }
 
@@ -626,12 +755,15 @@ mod tests {
                     {"socketTypeHash": 4, "singleInitialItemHash": 0, "randomizedPlugSetHash": 504},
                     {"socketTypeHash": 5, "singleInitialItemHash": 4248210736u32},
                     {"socketTypeHash": 6, "singleInitialItemHash": 60, "reusablePlugSetHash": 506},
-                    {"socketTypeHash": 1282012138, "singleInitialItemHash": 70}
+                    {"socketTypeHash": 1282012138, "singleInitialItemHash": 70},
+                    {"socketTypeHash": 7, "singleInitialItemHash": 80, "reusablePlugSetHash": 507},
+                    {"socketTypeHash": 8, "singleInitialItemHash": 90}
                 ],
                 "socketCategories": [
                     {"socketCategoryHash": 3956125808u32, "socketIndexes": [0]},
                     {"socketCategoryHash": 4241085061u32, "socketIndexes": [1, 2, 3, 4, 6, 7]},
-                    {"socketCategoryHash": 2048875504, "socketIndexes": [5]}
+                    {"socketCategoryHash": 2048875504, "socketIndexes": [5]},
+                    {"socketCategoryHash": 2685412949u32, "socketIndexes": [8, 9]}
                 ]
             }
         }));
@@ -658,6 +790,11 @@ mod tests {
             plug(41, "Kill Clip", "frames"),
             plug(42, "Explosive Payload", "frames"),
             plug(60, "Origin", "origins"),
+            plug(70, "Kill Tracker", "v400.plugs.weapons.masterworks.trackers"),
+            plug(80, "Empty Mod Socket", "v400.weapon.mod_empty"),
+            plug(81, "Backup Mag", "v400.weapon.mod_magazine"),
+            plug(90, "Masterworked: Range", "v400.plugs.weapons.masterworks.stat.range"),
+            plug(91, "Masterworked: Handling", "v400.plugs.weapons.masterworks.stat.handling"),
         ]
         .into_iter()
         .collect();
@@ -675,6 +812,7 @@ mod tests {
             ("503", set(&[31, 32, 33])),
             ("504", set(&[41, 42])),
             ("506", set(&[60])),
+            ("507", set(&[80, 81])),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -707,13 +845,71 @@ mod tests {
         assert_eq!(w.socket_indexes, vec![1, 2, 3, 4], "origin trait and kill tracker are not columns");
         let names: Vec<&str> = c.perks.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"Outlaw") && names.contains(&"Arrowhead Brake"));
-        assert!(!names.contains(&"Origin"));
+        assert!(names.contains(&"Origin") && names.contains(&"Backup Mag"), "part plugs get names too");
+        assert!(!names.contains(&"Kill Tracker"));
         let pool = |hashes: &[u32]| hashes.iter().map(|h| PerkHash(*h)).collect::<Vec<_>>();
         assert_eq!(
             w.pools,
             vec![pool(&[11, 12]), pool(&[21]), pool(&[31, 32]), pool(&[41, 42])],
             "each column's pool, without the retired perk"
         );
+    }
+
+    #[test]
+    fn catalog_finds_frame_origin_mod_and_masterwork() {
+        let (items, sets) = manifest();
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        let w = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
+        let kinds: Vec<(PartKind, u8)> = w.parts.iter().map(|p| (p.kind, p.socket_index)).collect();
+        assert_eq!(
+            kinds,
+            vec![(PartKind::Intrinsic, 0), (PartKind::Origin, 6), (PartKind::Mod, 8), (PartKind::Masterwork, 9)],
+            "kill tracker and cosmetics are not parts"
+        );
+        assert_eq!(w.parts[0].pool, vec![PerkHash(10)]);
+        assert_eq!(w.parts[1].pool, vec![PerkHash(60)]);
+        assert_eq!(w.parts[2].empty, vec![PerkHash(80)], "the empty mod plug is known");
+        let names: Vec<&str> = c.perks.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"Masterworked: Handling"), "every masterwork plug is named, even unlisted ones");
+    }
+
+    #[test]
+    fn copies_read_their_parts() {
+        let (items, sets) = manifest();
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        let def = c.weapons.into_iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
+        let plugged = |hashes: &[u32]| -> Vec<serde_json::Value> {
+            hashes.iter().map(|h| serde_json::json!({"plugHash": h})).collect()
+        };
+        let profile: RawProfile = serde_json::from_value(serde_json::json!({
+            "profileInventory": {"data": {"items": [
+                {"itemHash": 1000, "itemInstanceId": "a"}, {"itemHash": 1000, "itemInstanceId": "b"}
+            ]}},
+            "itemComponents": {
+                "instances": {"data": {}},
+                "sockets": {"data": {
+                    "a": {"sockets": plugged(&[10, 11, 21, 31, 41, 0, 60, 70, 81, 90])},
+                    "b": {"sockets": plugged(&[10, 11, 21, 31, 41, 0, 60, 70, 80, 91])}
+                }},
+                "reusablePlugs": {"data": {}}
+            }
+        }))
+        .unwrap();
+        let defs: HashMap<WeaponHash, WeaponDef> = [(def.hash, def)].into_iter().collect();
+        let out = read_profile(&profile, &defs, &enhanced());
+        let by_id: HashMap<&str, &WeaponCopy> = out.copies.iter().map(|c| (c.instance_id.as_str(), c)).collect();
+        let parts = |id: &str| by_id[id].parts.iter().map(|p| (p.kind, p.plugged.map(|h| h.0))).collect::<Vec<_>>();
+        assert_eq!(
+            parts("a"),
+            vec![
+                (PartKind::Intrinsic, Some(10)),
+                (PartKind::Origin, Some(60)),
+                (PartKind::Mod, Some(81)),
+                (PartKind::Masterwork, Some(90))
+            ]
+        );
+        assert_eq!(parts("b")[2], (PartKind::Mod, None), "an empty mod socket reads as no mod");
+        assert_eq!(by_id["a"].parts[1].options, vec![PerkHash(60)]);
     }
 
     #[test]
@@ -757,6 +953,7 @@ mod tests {
             socket_indexes: vec![1, 2, 3, 4],
             look: Default::default(),
             pools: Vec::new(),
+            parts: Vec::new(),
         }
     }
 

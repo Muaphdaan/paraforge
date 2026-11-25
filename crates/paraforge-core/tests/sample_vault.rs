@@ -43,6 +43,7 @@ fn def(hash: u32, name: &str, type_name: &str) -> WeaponDef {
         socket_indexes: vec![1, 2, 3, 4],
         look: Default::default(),
         pools: Vec::new(),
+        parts: Vec::new(),
     }
 }
 
@@ -74,6 +75,7 @@ fn copy(id: &str, weapon: u32, tier: u8, perks: [u32; 4], enhanced: [bool; 4], m
         locked: false,
         stats: Default::default(),
         location: Default::default(),
+        parts: Vec::new(),
     }
 }
 
@@ -227,7 +229,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 5);
+    assert_eq!(db.schema_version().unwrap(), 6);
 
     let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     defs[0].look = WeaponLook {
@@ -355,7 +357,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 5);
+    assert_eq!(db.schema_version().unwrap(), 6);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

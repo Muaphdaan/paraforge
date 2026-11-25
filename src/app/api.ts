@@ -76,6 +76,15 @@ export type ColumnRole = "barrel" | "magazine" | "trait";
 
 export type CopyColumn = { options: number[]; enhanced: boolean };
 
+/** A weapon socket that is not a random-perk column. */
+export type PartKind = "intrinsic" | "origin" | "masterwork" | "mod" | "catalyst";
+
+/** A part socket on a weapon definition. `pool` is filled for the frame and the origin trait. */
+export type WeaponPart = { kind: PartKind; socket_index: number; pool: number[]; empty: number[] };
+
+/** A part on an owned copy; `plugged` is null when the socket is empty. */
+export type CopyPart = { kind: PartKind; plugged: number | null; enhanced: boolean; options: number[] };
+
 export type VaultRow = {
   instance_id: string;
   weapon: number;
@@ -91,6 +100,8 @@ export type VaultRow = {
   /** Stat values by Bungie stat hash. */
   stats: Record<string, number>;
   location: CopyLocation;
+  /** Frame, origin trait, masterwork, mod and catalyst. Missing before the first sync with them. */
+  parts?: CopyPart[];
 };
 
 export type CopyLocation = "vault" | "inventory" | "equipped";
@@ -110,6 +121,7 @@ export type WeaponDef = {
   look: WeaponLook;
   /** Every perk that can currently roll in each column, same order as `columns`. */
   pools: number[][];
+  parts?: WeaponPart[];
 };
 
 /** One weapon in the Codex, from the `codex` command. */
@@ -120,6 +132,7 @@ export type CodexRow = {
   look: WeaponLook;
   roles: ColumnRole[];
   pools: number[][];
+  parts?: WeaponPart[];
   /** Copies you own. */
   owned: number;
 };

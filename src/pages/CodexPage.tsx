@@ -8,7 +8,7 @@ import { sameRoll, useChase } from "../app/chase";
 import { useCodex } from "../app/codex";
 import { useSession } from "../app/session";
 import { Banner, Dropdown, EmptyState } from "../ui/parts";
-import { AmmoBadge, BungieImage, ElementBadge, ElementIcon, PerkIcon } from "../ui/weapon";
+import { AmmoBadge, BungieImage, ElementBadge, ElementIcon, PartList, PerkIcon, weaponParts } from "../ui/weapon";
 
 type Owned = "all" | "owned" | "missing";
 type Rarity = "all" | "5" | "6";
@@ -449,6 +449,13 @@ function CodexDetail(props: {
           </div>
         ) : (
           <p className="pf-muted">You don't own this weapon yet.</p>
+        )}
+
+        {weaponParts(row.parts).length > 0 && (
+          <>
+            <h3 className="pf-detail__heading">Frame and origin</h3>
+            <PartList parts={weaponParts(row.parts)} perks={perks} exotic={row.look.rarity === 6} size={30} describe />
+          </>
         )}
 
         <h3 className="pf-detail__heading">{row.pools.length > 0 ? "Pick the roll you want" : "Perks"}</h3>
