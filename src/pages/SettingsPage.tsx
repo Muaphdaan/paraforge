@@ -18,6 +18,7 @@ import { CONTEXTS } from "../app/api";
 import { PLAYING_INTERVAL_MIN, useSession } from "../app/session";
 import { timeAgo, useNow } from "../app/time";
 import { KeysForm, RedirectUrl, signOut, useSignIn } from "../ui/account";
+import { useConfirm } from "../ui/feedback";
 import { Banner, Dropdown, Toggle, VerdictPill } from "../ui/parts";
 
 export type SettingsSection = "account" | "sync" | "scoring" | "data" | "shortcuts" | "about";
@@ -78,6 +79,7 @@ function Card(props: { id: string; title: string; children: ReactNode; wide?: bo
 
 function AccountCard() {
   const session = useSession();
+  const confirm = useConfirm();
   const auth = session.auth;
   const signIn = useSignIn();
   const [message, setMessage] = useState<string | null>(null);
@@ -130,6 +132,13 @@ function AccountCard() {
               type="button"
               className="pf-btn pf-btn--danger"
               onClick={async () => {
+                const ok = await confirm({
+                  title: "Sign out of Bungie?",
+                  body: <p>Your synced weapons, marks and Chase list stay on this PC. Sign in again to sync.</p>,
+                  confirm: "Sign out",
+                  tone: "danger",
+                });
+                if (!ok) return;
                 setMessage(null);
                 setMessage(await signOut(session.setAuth));
               }}
@@ -375,6 +384,9 @@ function DataCard() {
 
 const SHORTCUTS: [string, string][] = [
   ["Ctrl + K", "Search weapons and perks"],
+  ["F5", "Sync now"],
+  ["Ctrl + ,", "Settings"],
+  ["Alt + F", "Menus: File, Edit (Alt + E), View (Alt + V), Go (Alt + G), Help (Alt + H)"],
   ["Ctrl + 1 to 7", "Home, Vault, Codex, Triage, Chase list, Collections, Settings"],
   ["Ctrl + B", "Collapse or expand the sidebar"],
   ["Alt + Left", "Back"],

@@ -1,5 +1,5 @@
 // The ParaForge window: floating sidebar, page header, banners and the current section.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import backdrop from "./assets/backdrop.webp";
 import { PAGE_ORDER, PageId } from "./app/pages";
 import { SessionProvider, useSession } from "./app/session";
@@ -19,6 +19,11 @@ import { VaultPage } from "./pages/VaultPage";
 import { Header } from "./shell/Header";
 import { Sidebar } from "./shell/Sidebar";
 import { Banner } from "./ui/parts";
+import { ConfirmProvider, ToastProvider, useToast } from "./ui/feedback";
+import { MenuDef, MenuItem, TitleBar, closeWindow } from "./shell/TitleBar";
+import { StatusBar } from "./shell/StatusBar";
+import { PAGES } from "./app/pages";
+import { editCommands } from "./ui/overlays";
 
 const COLLAPSED_KEY = "paraforge.sidebarCollapsed";
 
@@ -99,9 +104,30 @@ function Shell() {
     }
   }, [collapsed]);
 
-  // Ctrl+K searches, Ctrl+B collapses the sidebar, Ctrl+1 to Ctrl+7 open the sections, Alt+Left goes back.
+  const openSettings = useCallback(
+    (section: SettingsSection) => {
+      setSettingsSection(section);
+      navigate("settings");
+    },
+    [navigate],
+  );
+
+  // Ctrl+K searches, Ctrl+B collapses the sidebar, Ctrl+1 to Ctrl+7 open the sections, Ctrl+, opens
+  // Settings, Alt+Left goes back and F5 syncs.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.key === "F5" || (e.ctrlKey && !e.altKey && e.key.toLowerCase() === "r")) {
+        // Never reload the web view; F5 syncs instead.
+        e.preventDefault();
+        if (e.key === "F5" && !e.repeat && session.auth?.signed_in && !session.syncStep) session.sync();
+        return;
+      }
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key === ",") {
+        e.preventDefault();
+        setSearchOpen(false);
+        navigate("settings");
+        return;
+      }
       // Ctrl+F too, so it opens ParaForge's search rather than the web view's find bar.
       if (e.ctrlKey && !e.altKey && !e.shiftKey && ["k", "f"].includes(e.key.toLowerCase())) {
         e.preventDefault();
@@ -120,7 +146,69 @@ function Shell() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, back, toggleSidebar]);
+  }, [navigate, back, toggleSidebar, session]);
+
+  const menus: MenuDef[] = [
+    {
+      id: "file",
+      label: "File",
+      mnemonic: "F",
+      items: () => [
+        {
+          label: session.syncStep ? "Syncing..." : "Sync now",
+          keys: "F5",
+          run: session.sync,
+          disabled: !session.auth?.signed_in || Boolean(session.syncStep),
+        },
+        { label: "Settings", keys: "Ctrl+,", run: () => navigate("settings") },
+        "separator",
+        { label: "Exit", keys: "Alt+F4", run: closeWindow },
+      ],
+    },
+    { id: "edit", label: "Edit", mnemonic: "E", items: () => [...editCommands(), "separator", { label: "Find", keys: "Ctrl+F", run: () => setSearchOpen(true) }] },
+    {
+      id: "view",
+      label: "View",
+      mnemonic: "V",
+      items: () => [
+        { label: collapsed ? "Expand the sidebar" : "Collapse the sidebar", keys: "Ctrl+B", run: toggleSidebar },
+        "separator",
+        ...CONTEXTS.map(
+          (c): MenuItem => ({
+            label: `Score for ${c.label}`,
+            checked: session.context === c.value,
+            run: () => session.setContext(c.value),
+          }),
+        ),
+      ],
+    },
+    {
+      id: "go",
+      label: "Go",
+      mnemonic: "G",
+      items: () => [
+        { label: "Back", keys: "Alt+Left", run: back, disabled: history.length < 2 },
+        "separator",
+        ...PAGE_ORDER.map(
+          (id, i): MenuItem => ({
+            label: PAGES[id].label,
+            keys: `Ctrl+${i + 1}`,
+            checked: (page === "weapon" ? "vault" : page) === id,
+            run: () => navigate(id),
+          }),
+        ),
+      ],
+    },
+    {
+      id: "help",
+      label: "Help",
+      mnemonic: "H",
+      items: () => [
+        { label: "Keyboard shortcuts", run: () => openSettings("shortcuts") },
+        { label: "About ParaForge", run: () => openSettings("about") },
+      ],
+    },
+  ];
 
   // What the header shows for the current page.
   const weaponRow = page === "weapon" ? session.vault?.find((r) => r.instance_id === route.weapon) : undefined;
@@ -143,8 +231,10 @@ function Shell() {
         : {};
 
   return (
-    <>
+    <div className="pf-window">
       <div className="pf-backdrop" style={{ backgroundImage: `url(${backdrop})` }} aria-hidden="true" />
+      <TitleBar menus={menus} />
+      <SyncToasts onNavigate={navigate} />
       <div className="pf-app" data-collapsed={collapsed}>
         <Sidebar page={page === "weapon" ? "vault" : page} collapsed={collapsed} onNavigate={navigate} />
         <main className="pf-main">
@@ -182,14 +272,46 @@ function Shell() {
           </div>
         </main>
       </div>
+      <StatusBar onNavigate={navigate} />
       <SearchPalette
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         onOpenWeapon={openWeaponPage}
         onOpenInCodex={openInCodex}
       />
-    </>
+    </div>
   );
+}
+
+/** Menus for the screens before the app proper (loading and first run). */
+const BASIC_MENUS: MenuDef[] = [
+  { id: "file", label: "File", mnemonic: "F", items: () => [{ label: "Exit", keys: "Alt+F4", run: closeWindow }] },
+  { id: "edit", label: "Edit", mnemonic: "E", items: editCommands },
+];
+
+/** A toast when a sync ends: what it found, with a way to review new drops. */
+function SyncToasts({ onNavigate }: { onNavigate: (page: PageId) => void }) {
+  const session = useSession();
+  const toast = useToast();
+  const was = useRef<string | null>(null);
+  useEffect(() => {
+    if (was.current && !session.syncStep) {
+      if (session.syncError) {
+        // Automatic syncs fail quietly into the status bar; a sync the player asked for says so.
+        if (!session.syncErrorAuto) toast({ tone: "error", text: `Sync failed: ${session.syncError}` });
+      } else {
+        const drops = (session.vault ?? []).filter((r) => (r.first_seen ?? 0) > 0 && !r.mark).length;
+        toast({
+          tone: "success",
+          text: drops > 0 ? `Synced. ${drops} new ${drops === 1 ? "drop" : "drops"} to review.` : "Synced. Your vault is up to date.",
+          action: drops > 0 ? { label: "Review", run: () => onNavigate("triage") } : undefined,
+        });
+      }
+    }
+    was.current = session.syncStep;
+    // Only the end of a sync matters; the rest is read when it happens.
+  }, [session.syncStep]);
+  return null;
 }
 
 /** First run until the first sync is done and Finish is pressed; then the app. */
@@ -203,13 +325,19 @@ function Root() {
   if (firstRun === null) {
     // app_info or the sign-in read failed: show the app (with its error banner) rather than nothing.
     if ((!session.auth && session.authError) || (session.auth && !session.info && session.infoLoaded)) return <Shell />;
-    return null;
+    // Still loading: the title bar alone, so the window can be moved and closed.
+    return (
+      <div className="pf-window">
+        <TitleBar menus={BASIC_MENUS} />
+      </div>
+    );
   }
   return firstRun ? (
-    <>
+    <div className="pf-window">
       <div className="pf-backdrop" style={{ backgroundImage: `url(${backdrop})` }} aria-hidden="true" />
+      <TitleBar menus={BASIC_MENUS} />
       <FirstRun onFinish={() => setFirstRun(false)} />
-    </>
+    </div>
   ) : (
     <Shell />
   );
@@ -271,9 +399,13 @@ export default function App() {
   useBrowserKeyGuard();
   return (
     <SessionProvider>
-      <ChaseProvider>
-        <Root />
-      </ChaseProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <ChaseProvider>
+            <Root />
+          </ChaseProvider>
+        </ConfirmProvider>
+      </ToastProvider>
       <Tooltips />
       <ContextMenu />
     </SessionProvider>

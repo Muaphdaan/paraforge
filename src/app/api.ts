@@ -154,6 +154,8 @@ export type VaultRow = {
   first_seen?: number;
   /** Your decision from the new drops review or duplicate triage. */
   mark?: CopyMark | null;
+  /** When the decision was made, Unix milliseconds (seconds for older marks); 0 without one. */
+  marked_at?: number;
 };
 
 export type CopyMark = "keep" | "shard" | "seen";

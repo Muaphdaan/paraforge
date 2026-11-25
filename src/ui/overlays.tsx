@@ -198,6 +198,20 @@ function itemsFor(target: Element | null): MenuItem[] {
   return items;
 }
 
+/** Cut, Copy, Paste and Select all for the Edit menu, acting on the focused field or selection. */
+export function editCommands(): { label: string; keys: string; run: () => void; disabled: boolean }[] {
+  const available = itemsFor(document.activeElement);
+  return [
+    ["Cut", "Ctrl+X"],
+    ["Copy", "Ctrl+C"],
+    ["Paste", "Ctrl+V"],
+    ["Select all", "Ctrl+A"],
+  ].map(([label, keys]) => {
+    const item = available.find((i) => i.label === label);
+    return { label, keys, run: item?.run ?? (() => {}), disabled: !item };
+  });
+}
+
 export function ContextMenu() {
   const [menu, setMenu] = useState<{
     x: number;

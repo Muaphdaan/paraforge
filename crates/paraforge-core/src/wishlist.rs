@@ -254,13 +254,20 @@ fn curator(notes: &str, source: &str) -> String {
 
 /// The notes without their "Constructed by @Name (tags):" lead-in, which ParaForge shows separately.
 fn readable_notes(text: &str) -> String {
-    // "Constructed by @Name (tags): ..." or "name (PvE / M+KB): ..." near the start.
-    let head = &text[..text.char_indices().nth(120).map_or(text.len(), |(i, _)| i)];
-    if let Some(i) = head.find("):") {
-        let rest = text[i + 2..].trim();
-        return rest.strip_prefix('"').and_then(|r| r.strip_suffix('"')).unwrap_or(rest).trim().to_string();
+    // "Constructed by @Name (tags): ...", "name (PvE / M+KB): ..." or "Name written as at v9 (PvE): ...".
+    // Any other "(...):" is part of the advice ("Pair Rampage with Kill Clip (or Frenzy): ...").
+    let Some((lead, after)) = text.split_once(" (") else { return text.to_string() };
+    let name = lead.trim();
+    let name = name.split_once(" written as at ").map_or(name, |(n, _)| n.trim());
+    let is_lead_in = name.contains("by @")
+        || name.contains("by u/")
+        || (!name.is_empty() && name.len() <= 32 && !name.contains(' '));
+    let Some(close) = after.find("):") else { return text.to_string() };
+    if !is_lead_in || lead.len() + 2 + close > 120 || after[..close].contains('(') {
+        return text.to_string();
     }
-    text.to_string()
+    let rest = after[close + 2..].trim();
+    rest.strip_prefix('"').and_then(|r| r.strip_suffix('"')).unwrap_or(rest).trim().to_string()
 }
 
 fn contexts(tags: &[String], title: &str, source: &str) -> Vec<Context> {
@@ -328,16 +335,23 @@ pub fn curated_rolls(
             }
             let mut columns: Vec<Vec<PerkHash>> = vec![Vec::new(); def.columns.len()];
             for (_, perks) in block.lines.iter().filter(|(w, _)| *w == weapon) {
-                for (position, perk) in perks.iter().enumerate() {
-                    let perk = PerkHash(base(*perk));
-                    let column = def
-                        .pools
-                        .iter()
-                        .position(|pool| pool.contains(&perk))
-                        .or_else(|| (perks.len() == columns.len()).then_some(position));
-                    if let Some(c) = column
-                        && !columns[c].contains(&perk)
-                    {
+                let placed: Option<Vec<(usize, PerkHash)>> = perks
+                    .iter()
+                    .enumerate()
+                    .map(|(position, perk)| {
+                        let perk = PerkHash(base(*perk));
+                        def.pools
+                            .iter()
+                            .position(|pool| pool.contains(&perk))
+                            .or_else(|| (perks.len() == columns.len()).then_some(position))
+                            .map(|c| (c, perk))
+                    })
+                    .collect();
+                // A line naming a perk no column can roll any more is skipped: dropping only that
+                // perk would leave its column empty, which means "any perk".
+                let Some(placed) = placed else { continue };
+                for (c, perk) in placed {
+                    if !columns[c].contains(&perk) {
                         columns[c].push(perk);
                     }
                 }
@@ -490,6 +504,30 @@ dimwishlist:item=100&perks=20,31#notes:Duel roll. Recommended Mod: Targeting tag
         assert_eq!(curator("pandapaxxy (PvE / M+KB): Great.", "Section"), "pandapaxxy");
         assert_eq!(curator("A plain note with no lead-in.", "Section"), "Section");
         assert_eq!(curator("A plain note.", "u/Mercules904's Massive Breakdown"), "Mercules904");
+    }
+
+    #[test]
+    fn notes_lose_only_a_curator_lead_in() {
+        let advice = "Pair Rampage with Kill Clip (or Frenzy): huge add-clear in Onslaught.";
+        assert_eq!(readable_notes(advice), advice);
+        assert_eq!(
+            readable_notes("Constructed by @Adamsdown_Boy (PvE PvE-Minor M+KB): First-choice roll."),
+            "First-choice roll."
+        );
+        assert_eq!(readable_notes("Adamsdown_Boy written as at v9.5.6.2 (PvE): rated well."), "rated well.");
+        assert_eq!(readable_notes("pandapaxxy (PvE / M+KB): \"Great roll.\""), "Great roll.");
+    }
+
+    #[test]
+    fn a_line_with_a_retired_perk_is_skipped_not_widened() {
+        // 22 rolls on no column any more; the line must not become "any perk" in its column.
+        let list = "// Old roll\ndimwishlist:item=100&perks=22,31\ndimwishlist:item=100&perks=20,30\n";
+        let rolls = curated_rolls(&parse_blocks(list), &defs(), |p| p);
+        assert!(!rolls.is_empty());
+        for roll in &rolls {
+            let cols: Vec<Vec<u32>> = roll.columns.iter().map(|c| c.iter().map(|p| p.0).collect()).collect();
+            assert_eq!(cols, vec![vec![], vec![], vec![20], vec![30]]);
+        }
     }
 
     #[test]

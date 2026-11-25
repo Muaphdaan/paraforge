@@ -416,7 +416,9 @@ impl Database {
 
     /// Replaces the whole vault with a fresh sync snapshot. Copies no longer owned are removed,
     /// and stored scores are dropped for any copy that is gone or has changed since it was scored.
-    pub fn replace_copies(&mut self, copies: &[WeaponCopy], synced_at: &str) -> Result<()> {
+    /// The first sync, or one with `fresh_start` (another account), is the baseline: none of its
+    /// copies count as new drops.
+    pub fn replace_copies(&mut self, copies: &[WeaponCopy], synced_at: &str, fresh_start: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
         let old: HashMap<String, (u32, u8, String, bool)> = {
             let mut stmt =
@@ -429,7 +431,7 @@ impl Database {
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
         };
         // The first sync is the baseline: nothing in it counts as a new drop.
-        let baseline = seen.is_empty();
+        let baseline = fresh_start || seen.is_empty();
         tx.execute("DELETE FROM weapon_copy", [])?;
         {
             let mut insert = tx.prepare(
@@ -729,7 +731,7 @@ impl Database {
     pub fn vault_rows(&self, context: Context) -> Result<Vec<VaultRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.instance_id, c.weapon_hash, w.name, w.type_name, c.tier, c.masterworked, c.locked, s.detail,
-                    w.look, w.columns, c.columns, c.stats, c.location, c.parts, c.first_seen, m.mark
+                    w.look, w.columns, c.columns, c.stats, c.location, c.parts, c.first_seen, m.mark, m.marked_at
              FROM weapon_copy c
              JOIN weapon w ON w.hash = c.weapon_hash
              LEFT JOIN copy_mark m ON m.instance_id = c.instance_id
@@ -754,6 +756,7 @@ impl Database {
                 r.get::<_, String>(13)?,
                 r.get::<_, String>(14)?,
                 r.get::<_, Option<String>>(15)?,
+                r.get::<_, Option<String>>(16)?,
             ))
         })?;
         let meta = self.meta_counts()?;
@@ -776,6 +779,7 @@ impl Database {
                 parts,
                 first_seen,
                 mark,
+                marked_at,
             ) = row?;
             out.push(VaultRow {
                 instance_id,
@@ -795,6 +799,7 @@ impl Database {
                 meta: meta.get(&WeaponHash(weapon)).copied().unwrap_or(0),
                 first_seen: first_seen.parse().unwrap_or(0),
                 mark,
+                marked_at: marked_at.and_then(|m| m.parse().ok()).unwrap_or(0),
             });
         }
         Ok(out)
@@ -861,6 +866,8 @@ pub struct VaultRow {
     pub first_seen: i64,
     /// The player's decision: "keep", "shard" or "seen" (reviewed, no decision).
     pub mark: Option<String>,
+    /// When the decision was made, Unix milliseconds; 0 without one.
+    pub marked_at: i64,
 }
 
 fn parse_context(value: &str) -> Result<Context> {

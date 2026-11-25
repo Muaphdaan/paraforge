@@ -29,6 +29,8 @@ const META_SYNCED_AT: &str = "synced_at";
 const CATALOG_VERSION: &str = "catalog-5";
 /// Bumped when ParaForge reads more from the god-roll list, so the next sync rebuilds the rolls.
 const ROLLS_VERSION: &str = "rolls-2";
+/// The Bungie membership whose weapons are stored.
+const META_COPIES_ACCOUNT: &str = "copies_membership_id";
 const META_ROLLS_BUILT: &str = "rolls_built";
 const META_ROLLS_ETAG: &str = "rolls_etag";
 const META_ROLLS_CHECKED: &str = "rolls_checked";
@@ -204,7 +206,11 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     let defs = db.weapons().map_err(|e| e.to_string())?;
     let read = read_profile(&profile, &defs, &enhanced);
-    db.replace_copies(&read.copies, &synced_at.to_string()).map_err(|e| e.to_string())?;
+    // Another account's weapons are not new drops: a sync for a different account starts afresh.
+    let previous = db.meta(META_COPIES_ACCOUNT).map_err(|e| e.to_string())?;
+    let switched = previous.as_deref().is_some_and(|p| p != membership_id);
+    db.replace_copies(&read.copies, &synced_at.to_string(), switched).map_err(|e| e.to_string())?;
+    db.set_meta(META_COPIES_ACCOUNT, &membership_id).map_err(|e| e.to_string())?;
     let ratings = db.ratings().map_err(|e| e.to_string())?;
     let rolls = db.rolls().map_err(|e| e.to_string())?;
     let rules = ScoringRules::default();

@@ -282,7 +282,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const markCopy = useCallback(async (instanceId: string, mark: CopyMark | null) => {
     await invoke("mark_copy", { instanceId, mark });
     setLoaded((l) =>
-      l ? { ...l, rows: l.rows.map((r) => (r.instance_id === instanceId ? { ...r, mark } : r)) } : l,
+      l
+        ? {
+            ...l,
+            rows: l.rows.map((r) => (r.instance_id === instanceId ? { ...r, mark, marked_at: mark ? Date.now() : 0 } : r)),
+          }
+        : l,
     );
   }, []);
 

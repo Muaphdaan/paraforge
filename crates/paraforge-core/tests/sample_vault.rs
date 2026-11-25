@@ -262,7 +262,7 @@ fn database_round_trip() {
     let mut v = vault();
     v[0].stats = [(4_043_523_819, 70), (3_871_231_066, 12)].into_iter().collect();
     v[0].location = CopyLocation::Equipped;
-    db.replace_copies(&v, "2026-11-24T21:00:00Z").unwrap();
+    db.replace_copies(&v, "2026-11-24T21:00:00Z", false).unwrap();
     let one = &defs[0];
     assert_eq!(db.weapon(one.hash).unwrap().as_ref(), Some(one));
     assert_eq!(db.weapon(WeaponHash(999_999)).unwrap(), None);
@@ -310,7 +310,7 @@ fn database_round_trip() {
     // A changed copy loses its stale score; an unchanged one keeps it.
     let mut changed = v.clone();
     changed.iter_mut().find(|c| c.instance_id == "go-1").unwrap().masterworked = true;
-    db.replace_copies(&changed, "2026-11-24T21:01:00Z").unwrap();
+    db.replace_copies(&changed, "2026-11-24T21:01:00Z", false).unwrap();
     let ids: Vec<String> = db.scores(Context::Pve).unwrap().into_iter().map(|s| s.instance_id).collect();
     assert!(!ids.contains(&"go-1".to_string()));
     assert!(ids.contains(&"nl-1".to_string()));
@@ -322,7 +322,7 @@ fn database_round_trip() {
 
     // A new sync without sv-3 drops the copy and its score.
     v.retain(|c| c.instance_id != "sv-3");
-    db.replace_copies(&v, "2026-11-24T21:02:00Z").unwrap();
+    db.replace_copies(&v, "2026-11-24T21:02:00Z", false).unwrap();
     assert_eq!(db.copies().unwrap().len(), 7);
     assert!(db.scores(Context::Pve).unwrap().iter().all(|s| s.instance_id != "sv-3"));
 
@@ -346,7 +346,7 @@ fn database_round_trip() {
     // An untiered (legacy) copy is stored and scored at the bottom of the tier range.
     let mut legacy = v.clone();
     legacy[0].tier = Tier::new(0).unwrap();
-    db.replace_copies(&legacy, "2026-11-24T21:03:00Z").unwrap();
+    db.replace_copies(&legacy, "2026-11-24T21:03:00Z", false).unwrap();
     assert_eq!(db.copies().unwrap().iter().filter(|c| c.tier.get() == 0).count(), 1);
 
     db.set_meta("data_pack", "dev").unwrap();
@@ -411,16 +411,16 @@ fn new_drops_and_marks() {
     let c = copy("c", 2, 3, perks, [false; 4], false);
 
     // The first sync is the baseline: nothing in it is a new drop.
-    db.replace_copies(&[a.clone(), b.clone()], "100").unwrap();
+    db.replace_copies(&[a.clone(), b.clone()], "100", false).unwrap();
     let seen = |db: &Database| -> HashMap<String, (i64, Option<String>)> {
         db.vault_rows(Context::Pve).unwrap().into_iter().map(|r| (r.instance_id, (r.first_seen, r.mark))).collect()
     };
     assert!(seen(&db).values().all(|(t, _)| *t == 0));
 
     // A later sync stamps only the copy it has not seen before; old copies keep their stamp.
-    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "200").unwrap();
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "200", false).unwrap();
     db.set_mark("b", Some("shard"), "210").unwrap();
-    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "300").unwrap();
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "300", false).unwrap();
     let rows = seen(&db);
     assert_eq!(rows["c"], (200, None));
     assert_eq!(rows["a"].0, 0);
@@ -430,8 +430,18 @@ fn new_drops_and_marks() {
     db.set_mark("b", None, "310").unwrap();
     assert!(db.set_mark("a", Some("favourite"), "310").is_err());
     db.set_mark("a", Some("keep"), "320").unwrap();
-    db.replace_copies(&[b, c], "400").unwrap();
-    db.replace_copies(&[a, copy("d", 2, 3, perks, [false; 4], false)], "500").unwrap();
+    db.replace_copies(&[b, c], "400", false).unwrap();
+    db.replace_copies(&[a, copy("d", 2, 3, perks, [false; 4], false)], "500", false).unwrap();
     let rows = seen(&db);
     assert_eq!(rows["a"], (500, None), "a copy that left and came back is new again, without its old mark");
+
+    // Decisions carry when they were made.
+    db.set_mark("d", Some("keep"), "1700000000123").unwrap();
+    let d = db.vault_rows(Context::Pve).unwrap().into_iter().find(|r| r.instance_id == "d").unwrap();
+    assert_eq!(d.marked_at, 1_700_000_000_123);
+
+    // Another account's vault is a fresh baseline, not a flood of new drops.
+    let e = copy("e", 1, 3, perks, [false; 4], false);
+    db.replace_copies(&[e], "600", true).unwrap();
+    assert!(seen(&db).values().all(|(t, _)| *t == 0));
 }

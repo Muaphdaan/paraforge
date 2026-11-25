@@ -92,7 +92,8 @@ fn god_rolls(state: State<'_, AppState>, weapon: u32) -> Result<Vec<paraforge_co
 fn mark_copy(state: State<'_, AppState>, instance_id: String, mark: Option<String>) -> Result<(), String> {
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        // Milliseconds, so quick decisions keep their order.
+        .map(|d| d.as_millis())
         .unwrap_or(0)
         .to_string();
     let db = state.db.lock().map_err(|e| e.to_string())?;
