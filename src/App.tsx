@@ -24,6 +24,7 @@ import { MenuDef, MenuItem, TitleBar, closeWindow } from "./shell/TitleBar";
 import { StatusBar } from "./shell/StatusBar";
 import { PAGES } from "./app/pages";
 import { editCommands } from "./ui/overlays";
+import { UpdatesProvider, useUpdates } from "./app/updates";
 
 const COLLAPSED_KEY = "paraforge.sidebarCollapsed";
 
@@ -39,6 +40,7 @@ type Route = { page: PageId; weapon?: string };
 
 function Shell() {
   const session = useSession();
+  const updates = useUpdates();
   // Visited pages, newest last; Back pops one.
   const [history, setHistory] = useState<Route[]>([{ page: "home" }]);
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -205,6 +207,7 @@ function Shell() {
       mnemonic: "H",
       items: () => [
         { label: "Keyboard shortcuts", run: () => openSettings("shortcuts") },
+        { label: "Check for updates", run: () => void updates.checkNow(true) },
         { label: "About ParaForge", run: () => openSettings("about") },
       ],
     },
@@ -405,9 +408,11 @@ export default function App() {
     <SessionProvider>
       <ToastProvider>
         <ConfirmProvider>
-          <ChaseProvider>
-            <Root />
-          </ChaseProvider>
+          <UpdatesProvider>
+            <ChaseProvider>
+              <Root />
+            </ChaseProvider>
+          </UpdatesProvider>
         </ConfirmProvider>
       </ToastProvider>
       <Tooltips />

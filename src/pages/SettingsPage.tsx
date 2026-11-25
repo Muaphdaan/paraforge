@@ -19,6 +19,7 @@ import { PLAYING_INTERVAL_MIN, useSession } from "../app/session";
 import { timeAgo, useNow } from "../app/time";
 import { KeysForm, RedirectUrl, signOut, useSignIn } from "../ui/account";
 import { useConfirm } from "../ui/feedback";
+import { useUpdates } from "../app/updates";
 import { Banner, Dropdown, Toggle, VerdictPill } from "../ui/parts";
 
 export type SettingsSection = "account" | "sync" | "scoring" | "data" | "shortcuts" | "about";
@@ -425,8 +426,29 @@ function ShortcutsCard() {
   );
 }
 
+function updateText(state: ReturnType<typeof useUpdates>["state"]): string {
+  switch (state.status) {
+    case "checking":
+      return "Checking for updates...";
+    case "downloading":
+      return `Downloading ParaForge ${state.version}...`;
+    case "ready":
+      return `ParaForge ${state.version} is downloaded and ready to install.`;
+    case "installing":
+      return `Installing ParaForge ${state.version}...`;
+    case "current":
+      return "You have the latest ParaForge.";
+    case "error":
+      return `The last update check did not work: ${state.error}`;
+    default:
+      return "ParaForge checks for new builds when it starts and every six hours, and updates itself.";
+  }
+}
+
 function AboutCard() {
   const { info } = useSession();
+  const updates = useUpdates();
+  const { status } = updates.state;
   return (
     <Card id="settings-about" title="About" wide>
       {info && (
@@ -441,6 +463,25 @@ function AboutCard() {
           <dd>{info.ruleset}</dd>
         </dl>
       )}
+      <p className="pf-muted" role="status">
+        {updateText(updates.state)}
+      </p>
+      <div className="pf-row">
+        {status === "ready" ? (
+          <button type="button" className="pf-btn pf-btn--primary" onClick={() => void updates.restart()}>
+            Restart to update
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="pf-btn"
+            disabled={status === "checking" || status === "downloading" || status === "installing"}
+            onClick={() => void updates.checkNow(true)}
+          >
+            Check for updates
+          </button>
+        )}
+      </div>
       <p className="pf-muted">
         Free and non-commercial. Not made by or affiliated with Bungie. Weapon and perk images come from Bungie.net.
         Font: Nunito (SIL Open Font License). Icons: Lucide (ISC).

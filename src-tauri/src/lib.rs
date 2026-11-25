@@ -22,7 +22,7 @@ pub(crate) struct AppState {
 
 #[derive(Serialize)]
 struct AppInfo {
-    version: &'static str,
+    version: String,
     core_version: &'static str,
     schema_version: i64,
     ruleset: String,
@@ -48,10 +48,11 @@ struct AppInfo {
 }
 
 #[tauri::command]
-fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
+fn app_info(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<AppInfo, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     Ok(AppInfo {
-        version: env!("CARGO_PKG_VERSION"),
+        // The build's version (CI stamps each build), which the updater compares.
+        version: app.package_info().version.to_string(),
         core_version: paraforge_core::VERSION,
         schema_version: db.schema_version().map_err(|e| e.to_string())?,
         ruleset: ScoringRules::default().ruleset,
@@ -158,6 +159,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        // Updates come only from this repository's releases (endpoint and signing key in
+        // tauri.conf.json), never from an address the interface supplies.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             auth::init_credential_store()?;
             app.manage(auth::AuthState::new()?);

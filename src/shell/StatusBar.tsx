@@ -1,14 +1,27 @@
 // The strip along the bottom of the window: sync state, the signed-in player, what needs attention
 // in the vault, the god-roll list and the scoring mode.
-import { CircleAlert, CloudCheck, CloudOff, Crown, Gamepad2, Inbox, RefreshCw, Trash2, UserRound } from "lucide-react";
+import {
+  CircleAlert,
+  CloudCheck,
+  CloudOff,
+  Crown,
+  Download,
+  Gamepad2,
+  Inbox,
+  RefreshCw,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { useMemo } from "react";
 import { CONTEXTS } from "../app/api";
 import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
+import { useUpdates } from "../app/updates";
 import { timeAgo, useNow } from "../app/time";
 
 export function StatusBar({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const session = useSession();
+  const updates = useUpdates();
   const now = useNow();
   const info = session.info;
   const signedIn = Boolean(session.auth?.signed_in);
@@ -128,6 +141,18 @@ export function StatusBar({ onNavigate }: { onNavigate: (page: PageId) => void }
       <span className="pf-statusbar__item" data-tip="Scores are for this mode; change it in the header or View menu">
         Scoring: {contextLabel}
       </span>
+      {(updates.state.status === "ready" || updates.state.status === "installing") && (
+        <button
+          type="button"
+          className="pf-statusbar__item pf-statusbar--accent"
+          onClick={updates.state.status === "ready" ? () => void updates.restart() : undefined}
+          aria-disabled={updates.state.status === "installing" || undefined}
+          data-tip={`ParaForge ${updates.state.version} is downloaded. Restart to install it.`}
+        >
+          <Download size={14} aria-hidden="true" />
+          {updates.state.status === "installing" ? "Updating..." : "Restart to update"}
+        </button>
+      )}
       {info && <span className="pf-statusbar__item pf-statusbar__version">v{info.version}</span>}
     </footer>
   );
