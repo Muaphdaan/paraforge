@@ -42,6 +42,7 @@ fn def(hash: u32, name: &str, type_name: &str) -> WeaponDef {
         columns: vec![Barrel, Magazine, Trait, Trait],
         socket_indexes: vec![1, 2, 3, 4],
         look: Default::default(),
+        pools: Vec::new(),
     }
 }
 
@@ -71,6 +72,8 @@ fn copy(id: &str, weapon: u32, tier: u8, perks: [u32; 4], enhanced: [bool; 4], m
         columns: perks.iter().zip(enhanced).map(|(p, e)| col(*p, e)).collect(),
         masterworked,
         locked: false,
+        stats: Default::default(),
+        location: Default::default(),
     }
 }
 
@@ -224,7 +227,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
+    assert_eq!(db.schema_version().unwrap(), 4);
 
     let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     defs[0].look = WeaponLook {
@@ -235,6 +238,7 @@ fn database_round_trip() {
         rarity: 5,
         ..Default::default()
     };
+    defs[0].pools = vec![vec![PerkHash(1), PerkHash(2)], vec![PerkHash(3)], vec![], vec![PerkHash(4)]];
     db.upsert_weapons(&defs).unwrap();
     let expected: HashMap<WeaponHash, WeaponDef> = defs.iter().map(|d| (d.hash, d.clone())).collect();
     assert_eq!(db.weapons().unwrap(), expected);
@@ -248,7 +252,12 @@ fn database_round_trip() {
     db.replace_ratings(&ratings(), "test").unwrap();
     db.replace_rolls(&f.rolls, "test").unwrap();
     let mut v = vault();
+    v[0].stats = [(4_043_523_819, 70), (3_871_231_066, 12)].into_iter().collect();
+    v[0].location = CopyLocation::Equipped;
     db.replace_copies(&v, "2026-11-24T21:00:00Z").unwrap();
+    let one = &defs[0];
+    assert_eq!(db.weapon(one.hash).unwrap().as_ref(), Some(one));
+    assert_eq!(db.weapon(WeaponHash(999_999)).unwrap(), None);
 
     let mut loaded = db.copies().unwrap();
     v.sort_by(|a, b| a.instance_id.cmp(&b.instance_id));
@@ -326,7 +335,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
+    assert_eq!(db.schema_version().unwrap(), 4);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

@@ -2,13 +2,14 @@
 //! allow-listed commands registered below; it never sees sign-in tokens or calls Bungie.
 
 mod auth;
+mod game;
 mod sync;
 #[cfg(windows)]
 mod window_style;
 
 use std::sync::Mutex;
 
-use paraforge_core::{Context, CopyScore, Database, ScoringRules};
+use paraforge_core::{Context, CopyScore, Database, ScoringRules, WeaponDef, WeaponHash};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -24,6 +25,15 @@ struct AppInfo {
     ruleset: String,
     /// Unix seconds of the last successful vault sync, if there has been one.
     synced_at: Option<i64>,
+    /// The player's Bungie Name from the last sync, for example "NightOwl#4821".
+    player: Option<String>,
+    /// Version of Bungie's item database last read.
+    manifest_version: Option<String>,
+    weapons_known: usize,
+    perks_known: usize,
+    copies: usize,
+    /// The scoring rules, so Settings can explain the verdict thresholds.
+    rules: ScoringRules,
 }
 
 #[tauri::command]
@@ -35,7 +45,20 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         schema_version: db.schema_version().map_err(|e| e.to_string())?,
         ruleset: ScoringRules::default().ruleset,
         synced_at: db.meta("synced_at").map_err(|e| e.to_string())?.and_then(|v| v.parse().ok()),
+        player: db.meta("player_name").map_err(|e| e.to_string())?,
+        manifest_version: db.meta("manifest_version").map_err(|e| e.to_string())?,
+        weapons_known: db.count("weapon").map_err(|e| e.to_string())?,
+        perks_known: db.count("perk").map_err(|e| e.to_string())?,
+        copies: db.count("weapon_copy").map_err(|e| e.to_string())?,
+        rules: ScoringRules::default(),
     })
+}
+
+/// One weapon's definition, including every perk each column can roll.
+#[tauri::command]
+fn weapon(state: State<'_, AppState>, hash: u32) -> Result<Option<WeaponDef>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.weapon(WeaponHash(hash)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -90,6 +113,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             vault_scores,
+            weapon,
+            game::game_running,
             auth::auth_status,
             auth::save_app_keys,
             auth::start_sign_in,

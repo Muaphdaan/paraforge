@@ -16,7 +16,7 @@ pub const CONTENT_URL: &str = "https://www.bungie.net";
 
 /// Components for a weapon sync: profile inventory (vault), character inventories, character
 /// equipment, item instances (tier), item sockets (equipped perks), reusable plugs (selectable perks).
-pub const PROFILE_COMPONENTS: &str = "102,201,205,300,305,310";
+pub const PROFILE_COMPONENTS: &str = "100,102,201,205,300,304,305,310";
 
 #[derive(Debug, Error)]
 pub enum ApiError {

@@ -22,7 +22,7 @@ const PLUG_SETS_TABLE: &str = "DestinyPlugSetDefinition";
 const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
-const CATALOG_VERSION: &str = "catalog-2";
+const CATALOG_VERSION: &str = "catalog-3";
 
 #[derive(Default)]
 pub struct SyncState {
@@ -178,6 +178,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         db.save_scores(context, &out.scores).map_err(|e| e.to_string())?;
     }
     db.set_meta(META_SYNCED_AT, &synced_at.to_string()).map_err(|e| e.to_string())?;
+    if let Some(name) = profile.player_name() {
+        db.set_meta("player_name", &name).map_err(|e| e.to_string())?;
+    }
     let manifest_version = db.meta("manifest_version").map_err(|e| e.to_string())?.unwrap_or_default();
 
     Ok(SyncSummary {

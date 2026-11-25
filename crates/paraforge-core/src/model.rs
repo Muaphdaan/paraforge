@@ -2,6 +2,7 @@
 //!
 //! Hashes are Bungie manifest hashes. Everything here is plain data: no I/O.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -101,6 +102,9 @@ pub struct WeaponDef {
     /// How the weapon looks and where it goes: icons, slot, element, ammo, rarity.
     #[serde(default)]
     pub look: WeaponLook,
+    /// Every perk that can currently roll in each column (base versions), same order as `columns`.
+    #[serde(default)]
+    pub pools: Vec<Vec<PerkHash>>,
 }
 
 /// Display data for a weapon, from Bungie's item definitions.
@@ -148,6 +152,40 @@ pub struct WeaponCopy {
     pub masterworked: bool,
     #[serde(default)]
     pub locked: bool,
+    /// This copy's stat values by Bungie stat hash (impact, range, stability...), as the game shows them.
+    #[serde(default)]
+    pub stats: BTreeMap<u32, i32>,
+    #[serde(default)]
+    pub location: CopyLocation,
+}
+
+/// Where an owned copy is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopyLocation {
+    #[default]
+    Vault,
+    /// In a character's inventory, not equipped.
+    Inventory,
+    Equipped,
+}
+
+impl CopyLocation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CopyLocation::Vault => "vault",
+            CopyLocation::Inventory => "inventory",
+            CopyLocation::Equipped => "equipped",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "inventory" => CopyLocation::Inventory,
+            "equipped" => CopyLocation::Equipped,
+            _ => CopyLocation::Vault,
+        }
+    }
 }
 
 /// A recommended perk set for a weapon in one context.
