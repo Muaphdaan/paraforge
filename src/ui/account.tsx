@@ -29,6 +29,7 @@ function SecretInput(props: { name: string; label: string; numeric?: boolean; se
           <button
             type="button"
             className="pf-secret__eye"
+            data-tip={shown ? `Hide ${props.label}` : `Show ${props.label}`}
             onClick={() => setShown((s) => !s)}
             aria-label={shown ? `Hide ${props.label}` : `Show ${props.label}`}
             aria-pressed={shown}
@@ -51,6 +52,11 @@ export function KeysForm(props: { submitLabel: string; onSaved?: () => void; foo
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    // Checked here rather than by the web view, whose warning bubble is Windows-styled.
+    if (["apiKey", "clientId", "clientSecret"].some((k) => !String(form.get(k) ?? "").trim())) {
+      setError("Fill in all three: API key, Client ID and Client secret.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -70,7 +76,7 @@ export function KeysForm(props: { submitLabel: string; onSaved?: () => void; foo
   }
 
   return (
-    <form className="pf-form" onSubmit={save} autoComplete="off">
+    <form className="pf-form" onSubmit={save} autoComplete="off" noValidate>
       <SecretInput name="apiKey" label="API key" secret />
       <SecretInput name="clientId" label="Client ID" numeric />
       <SecretInput name="clientSecret" label="Client secret" secret />

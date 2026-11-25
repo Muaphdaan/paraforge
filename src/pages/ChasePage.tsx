@@ -134,7 +134,7 @@ function ChaseLine(props: {
   const done = closest !== null && closest.matched === closest.wanted;
   return (
     <li className="pf-chaseline" data-done={done || undefined}>
-      <button type="button" className="pf-chaseline__weapon" onClick={props.onOpenInCodex} title="Open in the Codex">
+      <button type="button" className="pf-chaseline__weapon" onClick={props.onOpenInCodex} data-tip="Open in the Codex">
         <span className="pf-wrow__icon" data-rarity={weapon?.look.rarity}>
           <span className="pf-tile__fallback" aria-hidden="true">
             {name.slice(0, 1)}
@@ -203,7 +203,7 @@ function ChaseLine(props: {
             type="button"
             className="pf-iconbtn"
             onClick={props.onRemove}
-            title="Stop chasing"
+            data-tip="Stop chasing"
             aria-label={`Stop chasing this ${name} roll`}
           >
             <Trash2 size={16} aria-hidden="true" />

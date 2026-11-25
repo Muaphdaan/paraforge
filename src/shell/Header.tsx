@@ -28,7 +28,8 @@ export function Header(props: {
                 type="button"
                 className="pf-btn pf-btn--primary pf-btn--small"
                 onClick={props.onBack}
-                title="Back (Alt+Left)"
+                data-tip="Back (Alt+Left)"
+                aria-keyshortcuts="Alt+ArrowLeft"
               >
                 Back
               </button>
@@ -53,7 +54,13 @@ export function Header(props: {
         <p className="pf-header__subtitle">{props.subtitle ?? def.subtitle}</p>
       </div>
       <div className="pf-header__tools">
-        <button type="button" className="pf-searchbtn" onClick={props.onSearch} aria-keyshortcuts="Control+K">
+        <button
+          type="button"
+          className="pf-searchbtn"
+          onClick={props.onSearch}
+          aria-keyshortcuts="Control+K"
+          data-tip="Search weapons and perks (Ctrl+K)"
+        >
           <Search size={18} aria-hidden="true" />
           <span>Search weapons and perks</span>
           <kbd>Ctrl K</kbd>
@@ -100,7 +107,7 @@ function SyncStatus() {
       disabled={!signedIn && !busy}
       aria-disabled={busy || undefined}
       aria-label={label}
-      title={label}
+      data-tip={label}
     >
       <Icon size={18} className={busy ? "pf-spin" : undefined} aria-hidden="true" />
     </button>

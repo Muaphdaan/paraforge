@@ -88,7 +88,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
       data-masterworked={row.masterworked || undefined}
       aria-pressed={props.selected}
       aria-label={label}
-      title={`${row.name} · ${row.type_name}`}
+      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.tier > 0 ? ` · Tier ${row.tier}` : ""}${row.score ? ` · ${row.score.score.toFixed(0)} ${VERDICT_LABEL[row.score.verdict]}` : ""}`}
       onClick={props.onSelect}
     >
       <span className="pf-tile__art">
@@ -139,8 +139,14 @@ export function PerkIcon(props: {
       className="pf-perk"
       data-enhanced={props.enhanced || undefined}
       style={{ width: size, height: size }}
-      title={title}
-      {...(props.decorative ? { "aria-hidden": true } : { role: "img", "aria-label": name })}
+      data-tip={title}
+      {...(props.decorative
+        ? { "aria-hidden": true }
+        : {
+            role: "img",
+            "aria-label": props.enhanced ? `${name} (enhanced)` : name,
+            "aria-description": props.perk?.description || undefined,
+          })}
     >
       {props.perk?.icon ? <BungieImage path={props.perk.icon} className="pf-perk__icon" /> : null}
     </span>

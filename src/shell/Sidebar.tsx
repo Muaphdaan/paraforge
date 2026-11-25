@@ -59,7 +59,7 @@ function NavItem(props: { id: PageId; page: PageId; collapsed: boolean; onNaviga
       type="button"
       className="pf-nav__item"
       aria-current={props.page === props.id ? "page" : undefined}
-      title={props.collapsed ? def.label : undefined}
+      data-tip={props.collapsed ? def.label : undefined}
       onClick={() => props.onNavigate(props.id)}
     >
       <Icon size={20} aria-hidden="true" />

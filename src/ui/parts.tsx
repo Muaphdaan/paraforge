@@ -61,7 +61,7 @@ export function Banner(props: {
       <div className="pf-banner__text">{props.children}</div>
       {props.action}
       {props.onDismiss && (
-        <button type="button" className="pf-iconbtn pf-iconbtn--plain" onClick={props.onDismiss} title="Dismiss">
+        <button type="button" className="pf-iconbtn pf-iconbtn--plain" onClick={props.onDismiss} data-tip="Dismiss">
           <X size={16} aria-hidden="true" />
           <span className="pf-visually-hidden">Dismiss</span>
         </button>
@@ -90,12 +90,14 @@ export function VerdictPill({ verdict }: { verdict: Verdict }) {
 
 export function TierPill({ tier }: { tier: number }) {
   return tier > 0 ? (
-    <span className="pf-tier" title={`Tier ${tier}`}>
-      T{tier}
+    <span className="pf-tier" data-tip={`Tier ${tier}`}>
+      <span aria-hidden="true">T{tier}</span>
+      <span className="pf-visually-hidden">Tier {tier}</span>
     </span>
   ) : (
-    <span className="pf-tier pf-muted" title="No tier">
-      -
+    <span className="pf-tier pf-muted" data-tip="No tier">
+      <span aria-hidden="true">-</span>
+      <span className="pf-visually-hidden">No tier</span>
     </span>
   );
 }

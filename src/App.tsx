@@ -5,6 +5,7 @@ import { PAGE_ORDER, PageId } from "./app/pages";
 import { SessionProvider, useSession } from "./app/session";
 import { HomePage } from "./pages/HomePage";
 import { ChaseProvider } from "./app/chase";
+import { ContextMenu, Tooltips, useBrowserKeyGuard } from "./ui/overlays";
 import { ChasePage } from "./pages/ChasePage";
 import { CodexPage } from "./pages/CodexPage";
 import { CollectionsPage } from "./pages/CollectionsPage";
@@ -100,7 +101,8 @@ function Shell() {
   // Ctrl+K searches, Ctrl+B collapses the sidebar, Ctrl+1 to Ctrl+6 open the sections, Alt+Left goes back.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+      // Ctrl+F too, so it opens ParaForge's search rather than the web view's find bar.
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && ["k", "f"].includes(e.key.toLowerCase())) {
         e.preventDefault();
         setSearchOpen((o) => !o);
       } else if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
@@ -264,11 +266,14 @@ function Banners({ page, onNavigate }: { page: PageId; onNavigate: (page: PageId
 }
 
 export default function App() {
+  useBrowserKeyGuard();
   return (
     <SessionProvider>
       <ChaseProvider>
         <Root />
       </ChaseProvider>
+      <Tooltips />
+      <ContextMenu />
     </SessionProvider>
   );
 }

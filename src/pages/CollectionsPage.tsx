@@ -203,7 +203,7 @@ export function CollectionsPage(props: { onOpenInCodex: (hash: number) => void }
                 data-rarity={w.look.rarity}
                 data-owned={w.owned > 0 || undefined}
                 aria-label={`${w.name}, ${w.type_name}, ${w.owned > 0 ? "owned" : "not owned"}. Open in the Codex`}
-                title={`${w.name} · ${w.type_name}`}
+                data-tip={`${w.name}\n${w.look.rarity === 6 ? "Exotic " : ""}${w.type_name} · ${w.owned > 0 ? "Owned" : "Not owned"}`}
                 onClick={() => props.onOpenInCodex(w.hash)}
               >
                 <span className="pf-tile__art">

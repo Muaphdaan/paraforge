@@ -205,7 +205,7 @@ export function CodexPage(props: {
               spellCheck={false}
             />
             {query && (
-              <button type="button" className="pf-search__clear" onClick={() => setQuery("")} title="Clear search">
+              <button type="button" className="pf-search__clear" onClick={() => setQuery("")} data-tip="Clear search">
                 <X size={16} aria-hidden="true" />
                 <span className="pf-visually-hidden">Clear search</span>
               </button>
@@ -321,7 +321,9 @@ export function CodexPage(props: {
 /** A Codex tile: the icon with its season badge, the element, and how many you own. Unowned tiles are dimmed. */
 const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: boolean; onSelect: (hash: number) => void }) {
   const { row } = props;
-  const label = [row.name, row.type_name, row.owned > 0 ? `you own ${row.owned}` : "not owned"].join(", ");
+  const label = [row.name, row.type_name, row.look.source, row.owned > 0 ? `you own ${row.owned}` : "not owned"]
+    .filter(Boolean)
+    .join(", ");
   return (
     <button
       type="button"
@@ -331,7 +333,7 @@ const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: bool
       data-owned={row.owned > 0 || undefined}
       aria-pressed={props.selected}
       aria-label={label}
-      title={`${row.name} · ${row.type_name}${row.look.source ? `\n${row.look.source}` : ""}`}
+      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.look.source ? ` · ${row.look.source}` : ""}${row.owned > 0 ? ` · You own ${row.owned}` : ""}`}
       onClick={() => props.onSelect(row.hash)}
     >
       <span className="pf-tile__art">

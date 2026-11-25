@@ -215,7 +215,7 @@ export function VaultPage({
               spellCheck={false}
             />
             {query && (
-              <button type="button" className="pf-search__clear" onClick={() => setQuery("")} title="Clear search">
+              <button type="button" className="pf-search__clear" onClick={() => setQuery("")} data-tip="Clear search">
                 <X size={16} aria-hidden="true" />
                 <span className="pf-visually-hidden">Clear search</span>
               </button>
@@ -246,7 +246,7 @@ export function VaultPage({
               type="button"
               aria-pressed={prefs.view === "grid"}
               onClick={() => setPrefs((p) => ({ ...p, view: "grid" }))}
-              title="Icon grid"
+              data-tip="Icon grid"
             >
               <LayoutGrid size={18} aria-hidden="true" />
               <span className="pf-visually-hidden">Icon grid</span>
@@ -255,7 +255,7 @@ export function VaultPage({
               type="button"
               aria-pressed={prefs.view === "list"}
               onClick={() => setPrefs((p) => ({ ...p, view: "list" }))}
-              title="List"
+              data-tip="List"
             >
               <List size={18} aria-hidden="true" />
               <span className="pf-visually-hidden">List</span>
