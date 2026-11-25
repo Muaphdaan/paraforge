@@ -9,7 +9,7 @@ use paraforge_core::{
     ColumnRole, CopyColumn, CopyLocation, CopyPart, PartKind, PerkHash, PerkInfo, Tier, WeaponCopy, WeaponDef,
     WeaponHash, WeaponLook, WeaponPart,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// DestinyItemType.Weapon.
 const ITEM_TYPE_WEAPON: i32 = 3;
@@ -101,6 +101,9 @@ pub struct RawPlugItem {
     pub plug_item_hash: u32,
     /// In a random-roll plug set: false for perks that no longer drop. Missing means it can roll.
     pub currently_can_roll: Option<bool>,
+    /// On an owned weapon: false when the game will not let the player select this perk now.
+    pub can_insert: Option<bool>,
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -167,9 +170,9 @@ fn clean_source(text: &str) -> String {
 }
 
 /// Inventory buckets of the three weapon slots.
-const BUCKET_KINETIC: u32 = 1_498_876_634;
-const BUCKET_ENERGY: u32 = 2_465_295_065;
-const BUCKET_POWER: u32 = 953_998_645;
+pub const BUCKET_KINETIC: u32 = 1_498_876_634;
+pub const BUCKET_ENERGY: u32 = 2_465_295_065;
+pub const BUCKET_POWER: u32 = 953_998_645;
 
 fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>) -> WeaponLook {
     let collectible = item.collectible_hash.unwrap_or(0);
@@ -447,6 +450,8 @@ pub struct RawItem {
     pub item_hash: u32,
     pub item_instance_id: Option<String>,
     pub state: u32,
+    /// The bucket the item sits in now: a weapon slot on a character, the vault, the Postmaster.
+    pub bucket_hash: u32,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -531,12 +536,48 @@ pub struct RawItemComponents {
     pub stats: Component<HashMap<String, RawItemStats>>,
 }
 
+/// Profile component 200: one character.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawCharacter {
+    pub date_last_played: String,
+    pub light: i32,
+    /// 0 Titan, 1 Hunter, 2 Warlock.
+    pub class_type: i32,
+    pub emblem_path: String,
+    pub emblem_background_path: String,
+}
+
+/// A character, for picking who gets a weapon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Character {
+    pub id: String,
+    /// "Titan", "Hunter" or "Warlock".
+    pub class: String,
+    pub light: i32,
+    /// ISO time Bungie last saw the character played.
+    pub last_played: String,
+    pub emblem: String,
+    pub emblem_background: String,
+}
+
+pub fn class_name(class_type: i32) -> &'static str {
+    match class_type {
+        0 => "Titan",
+        1 => "Hunter",
+        2 => "Warlock",
+        _ => "Guardian",
+    }
+}
+
 /// The parts of a `DestinyProfileResponse` that ParaForge reads.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RawProfile {
     pub profile: Component<RawProfileData>,
     pub profile_inventory: Component<RawItemList>,
+    /// Optional: only the character picker for moving weapons needs it.
+    pub characters: Component<HashMap<String, RawCharacter>>,
     pub character_inventories: Component<HashMap<String, RawItemList>>,
     pub character_equipment: Component<HashMap<String, RawItemList>>,
     pub item_components: RawItemComponents,
@@ -558,6 +599,27 @@ impl RawProfile {
         .into_iter()
         .filter_map(|(name, missing)| missing.then_some(name))
         .collect()
+    }
+
+    /// The player's characters, most recently played first.
+    pub fn characters(&self) -> Vec<Character> {
+        let mut out: Vec<Character> = self
+            .characters
+            .data
+            .iter()
+            .flatten()
+            .map(|(id, c)| Character {
+                id: id.clone(),
+                class: class_name(c.class_type).to_string(),
+                light: c.light,
+                last_played: c.date_last_played.clone(),
+                emblem: c.emblem_path.clone(),
+                emblem_background: c.emblem_background_path.clone(),
+            })
+            .collect();
+        // ISO times sort as text.
+        out.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.id.cmp(&b.id)));
+        out
     }
 
     /// The player's Bungie Name, for example "NightOwl#4821", when Bungie sent it.
@@ -806,7 +868,11 @@ mod tests {
             reusable_plug_items: hashes
                 .iter()
                 // 33 is a retired perk: it is in the set but no longer drops.
-                .map(|h| RawPlugItem { plug_item_hash: *h, currently_can_roll: (*h == 33).then_some(false) })
+                .map(|h| RawPlugItem {
+                    plug_item_hash: *h,
+                    currently_can_roll: (*h == 33).then_some(false),
+                    ..Default::default()
+                })
                 .collect(),
         };
         let sets = [

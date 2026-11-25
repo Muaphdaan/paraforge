@@ -24,7 +24,7 @@ keyring-core = "1"
 tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-single-instance = { version = "2.5.5", features = ["deep-link"] }
 paraforge-bungie = { version = "0.1.0", path = "../crates/paraforge-bungie" }
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "time"] }
 
 [target."cfg(windows)".dependencies]
 windows-native-keyring-store = "1"

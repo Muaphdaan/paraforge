@@ -6,7 +6,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { Check, ChevronDown, ChevronUp, Crosshair, Crown } from "lucide-react";
 import { ColumnRole, CopyColumn, CuratedRoll, Perk, ROLE_LABELS, ScoreContext } from "../app/api";
 import { useSession } from "../app/session";
+import { EquipButton } from "./equip";
 import { PerkIcon } from "./weapon";
+
+/** An owned copy to compare rolls with: any vault row fits. */
+export type OwnedCopy = { instance_id: string; columns: CopyColumn[] };
 
 const cache = new Map<string, Promise<CuratedRoll[]>>();
 
@@ -125,9 +129,9 @@ export function GodRolls(props: {
   perks: Record<number, Perk>;
   context: ScoreContext;
   /** The copy to compare against; its perks are lit and the closest roll comes first. */
-  copy?: CopyColumn[];
+  copy?: OwnedCopy;
   /** Several owned copies: each roll is compared with the copy that comes closest to it. */
-  copies?: CopyColumn[][];
+  copies?: OwnedCopy[];
   /** Show at most this many rolls before "Show all". */
   limit?: number;
   compact?: boolean;
@@ -150,10 +154,10 @@ export function GodRolls(props: {
     const list = context === "all" ? distinct(base) : base.filter((r) => r.context === context);
     return list
       .map((roll, order) => {
-        let copy: CopyColumn[] | undefined;
+        let copy: OwnedCopy | undefined;
         let match = { matched: 0, wanted: 0 };
         for (const c of pool) {
-          const m = rollMatch(roll, c);
+          const m = rollMatch(roll, c.columns);
           if (!copy || matchShare(m) > matchShare(match)) {
             copy = c;
             match = m;
@@ -265,7 +269,7 @@ function RollCard(props: {
   roll: CuratedRoll;
   roles: ColumnRole[];
   perks: Record<number, Perk>;
-  copy?: CopyColumn[];
+  copy?: OwnedCopy;
   /** The user owns more than one copy, so the closest one is compared. */
   several: boolean;
   match: { matched: number; wanted: number };
@@ -285,6 +289,7 @@ function RollCard(props: {
   const { matched, wanted } = props.match;
   const notes = roll.notes.trim();
   const long = notes.length > 220;
+  const equipLabel = matched === wanted ? "Equip this roll" : props.several ? "Equip closest copy" : "Equip partial roll";
   return (
     <li className="pf-roll" data-god={isGod(roll) || undefined}>
       <div className="pf-roll__head">
@@ -318,7 +323,7 @@ function RollCard(props: {
             ) : (
               <span className="pf-roll__perks">
                 {want.map((h) => {
-                  const have = copy?.[i]?.options.includes(h);
+                  const have = copy?.columns[i]?.options.includes(h);
                   return (
                     <span key={h} className="pf-roll__perk" data-have={have || undefined}>
                       <PerkIcon hash={h} perk={props.perks[h]} size={props.compact ? 24 : 28} decorative />
@@ -378,6 +383,16 @@ function RollCard(props: {
       )}
       <div className="pf-roll__foot">
         <span className="pf-muted pf-roll__by">by {roll.curator}</span>
+        <span className="pf-roll__actions">
+        {copy && matched > 0 && (
+          <EquipButton
+            small
+            instanceId={copy.instance_id}
+            perks={roll.columns}
+            label={equipLabel}
+            ariaLabel={`${equipLabel}: ${roll.title || "curated roll"}, ${roll.context === "pvp" ? "PvP" : "PvE"}`}
+          />
+        )}
         {props.onChase && (
           <button
             type="button"
@@ -399,6 +414,7 @@ function RollCard(props: {
             {props.chased ? "On your Chase list" : "Chase this roll"}
           </button>
         )}
+        </span>
       </div>
       {failed && <p className="pf-roll__error">{failed}</p>}
     </li>

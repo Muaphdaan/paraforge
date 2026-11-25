@@ -5,6 +5,7 @@ import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "..
 import { GodRolls } from "../ui/godrolls";
 import { TierPill, VerdictPill } from "../ui/parts";
 import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
+import { EquipButton } from "../ui/equip";
 
 export function WeaponDetail(props: {
   row: VaultRow;
@@ -68,10 +69,13 @@ export function WeaponDetail(props: {
           </p>
         )}
 
-        <button type="button" className="pf-btn pf-btn--primary pf-detail__open" onClick={props.onOpen}>
-          Open weapon page
-          <ArrowRight size={16} aria-hidden="true" />
-        </button>
+        <div className="pf-detail__actions">
+          <button type="button" className="pf-btn pf-btn--primary pf-detail__open" onClick={props.onOpen}>
+            Open weapon page
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+          {row.location !== "equipped" && <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />}
+        </div>
 
         {row.score ? (
           <div className="pf-detail__score">
@@ -132,7 +136,7 @@ export function WeaponDetail(props: {
               roles={row.roles}
               perks={perks}
               context={props.context}
-              copy={row.columns}
+              copy={row}
               limit={2}
               compact
             />

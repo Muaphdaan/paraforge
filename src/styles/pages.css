@@ -1372,3 +1372,23 @@ kbd {
 /* Focus lands here after the last drop or a bulk mark; no ring on these containers. */
 .pf-triage__empty:focus,
 .pf-dupe:focus { outline: none; }
+
+/* ---------- Equip ---------- */
+.pf-roll__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pf-detail__actions { display: flex; gap: var(--space-2); }
+.pf-detail__actions .pf-detail__open { flex: 1; }
+.pf-equip[aria-disabled="true"] { opacity: 0.6; cursor: default; }
+.pf-equip__menu { min-width: 220px; }
+.pf-equip__menuhead {
+  padding: 4px 10px 6px;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pf-equip__char { grid-template-columns: 28px minmax(0, 1fr) auto; }
+.pf-equip__emblem { width: 28px; height: 28px; overflow: hidden; border-radius: 6px; background: var(--panel-raised); }
+.pf-equip__emblem img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pf-equip__light { color: var(--exotic); font-variant-numeric: tabular-nums; }
+.pf-equip__light::before { content: "\2726 "; }

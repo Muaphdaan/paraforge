@@ -542,7 +542,7 @@ function CodexDetail(props: {
               roles={row.roles}
               perks={perks}
               context={session.context}
-              copies={copies.map((c) => c.columns)}
+              copies={copies}
               limit={3}
               compact
               onChase={(roll) => chase.add(row.hash, roll.columns).then(() => undefined)}

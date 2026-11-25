@@ -20,6 +20,7 @@ import { useSession } from "../app/session";
 import { EmptyState, TierPill, useCopy, VerdictPill } from "../ui/parts";
 import { GodRolls } from "../ui/godrolls";
 import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
+import { EquipButton } from "../ui/equip";
 
 type ScoreMap = Record<string, CopyScore>;
 
@@ -170,6 +171,7 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
         )}
       </div>
       <div className="pf-weapon__actions">
+        {row.location !== "equipped" && <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />}
         <button type="button" className="pf-btn" onClick={copySummary}>
           {copyState === "copied" ? <Check size={16} aria-hidden="true" /> : <ClipboardCopy size={16} aria-hidden="true" />}
           <span role="status">
@@ -326,7 +328,7 @@ function GodRollsCard(props: {
           roles={row.roles}
           perks={props.perks}
           context={props.context}
-          copy={row.columns}
+          copy={row}
           limit={6}
         />
       )}

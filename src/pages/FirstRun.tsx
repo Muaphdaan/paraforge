@@ -76,8 +76,9 @@ function ConnectStep(props: { onDone: () => void; canGoBack: boolean }) {
           <RedirectUrl />
         </li>
         <li>
-          Set OAuth client type to <strong>Confidential</strong> and tick the permission to read your Destiny 2
-          information (vault, inventory and vendors).
+          Set OAuth client type to <strong>Confidential</strong> and tick the permissions to read your Destiny 2
+          information (vault, inventory and vendors) and to <strong>move or equip Destiny gear</strong> (for the
+          Equip buttons).
         </li>
       </ol>
       <KeysForm submitLabel="Save keys" onSaved={props.onDone} />

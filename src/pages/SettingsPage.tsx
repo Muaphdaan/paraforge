@@ -147,6 +147,14 @@ function AccountCard() {
               Sign out
             </button>
           </div>
+          <p className="pf-muted">
+            The Equip buttons need the &ldquo;Move or equip Destiny gear&rdquo; permission on your Bungie app. If
+            equipping says it is missing, turn it on in{" "}
+            <button type="button" className="pf-link" onClick={() => invoke("open_bungie_apps").catch(() => {})}>
+              your Bungie apps
+            </button>
+            , then press Sign in again.
+          </p>
         </>
       ) : auth.has_app_keys ? (
         <>

@@ -31,6 +31,8 @@ const CATALOG_VERSION: &str = "catalog-5";
 const ROLLS_VERSION: &str = "rolls-2";
 /// The Bungie membership whose weapons are stored.
 const META_COPIES_ACCOUNT: &str = "copies_membership_id";
+/// The player's characters from the last sync, as JSON.
+pub(crate) const META_CHARACTERS: &str = "characters";
 const META_ROLLS_BUILT: &str = "rolls_built";
 const META_ROLLS_ETAG: &str = "rolls_etag";
 const META_ROLLS_CHECKED: &str = "rolls_checked";
@@ -41,9 +43,11 @@ const ROLLS_SOURCE: &str = "voltron";
 #[derive(Default)]
 pub struct SyncState {
     running: AtomicBool,
+    /// An item action (move, equip, perk switch) is running.
+    pub(crate) acting: AtomicBool,
 }
 
-struct RunningGuard<'a>(&'a AtomicBool);
+pub(crate) struct RunningGuard<'a>(pub(crate) &'a AtomicBool);
 
 impl Drop for RunningGuard<'_> {
     fn drop(&mut self) {
@@ -82,7 +86,7 @@ fn progress(app: &AppHandle, step: &str) {
     let _ = app.emit("sync-progress", step);
 }
 
-fn api_err(e: ApiError) -> String {
+pub(crate) fn api_err(e: ApiError) -> String {
     e.to_string()
 }
 
@@ -189,7 +193,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     progress(&app, "Reading your vault and characters");
     // The membership whose profile was read: Settings shows the stored Bungie Name only while the
     // same account is signed in.
-    let (profile, membership_id) = read_player(&app, &api).await?;
+    let (profile, tokens, _) = read_player(&app, &api).await?;
+    let membership_id = tokens.membership_id.clone();
+    drop(tokens);
     let missing = profile.missing_parts();
     if !missing.is_empty() {
         // Storing a partial profile would look like deleted weapons, so keep the last good sync.
@@ -229,6 +235,12 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     if let Some(name) = profile.player_name() {
         db.set_meta("player_name", &name).map_err(|e| e.to_string())?;
         db.set_meta("player_membership_id", &membership_id).map_err(|e| e.to_string())?;
+    }
+    // The character picker for moving weapons. Kept from the last sync when Bungie left it out.
+    let characters = profile.characters();
+    if !characters.is_empty() || switched {
+        let json = serde_json::to_string(&characters).map_err(|e| e.to_string())?;
+        db.set_meta(META_CHARACTERS, &json).map_err(|e| e.to_string())?;
     }
     let manifest_version = db.meta("manifest_version").map_err(|e| e.to_string())?.unwrap_or_default();
 
@@ -360,28 +372,34 @@ async fn update_rolls(app: &AppHandle, catalog: &str) -> Result<(usize, Option<S
 /// Fetches the player's profile and the membership it belongs to. The access token is fetched again
 /// here because the manifest download can outlast it; if Bungie still rejects it, it is refreshed
 /// once and the call retried.
-async fn read_player(app: &AppHandle, api: &BungieApi) -> Result<(RawProfile, String), String> {
+pub(crate) async fn read_player(
+    app: &AppHandle,
+    api: &BungieApi,
+) -> Result<(RawProfile, paraforge_bungie::Tokens, DestinyMembership), String> {
     let auth_state = app.state::<AuthState>();
     let (_, tokens) = auth::access_token(&auth_state).await?;
     match profile_for(api, &tokens).await {
         Err(ApiError::SignInRequired) => {
             let (_, fresh) = auth::refresh_after_rejection(&auth_state, &tokens).await?;
-            let profile = profile_for(api, &fresh).await.map_err(api_err)?;
-            Ok((profile, fresh.membership_id.clone()))
+            let (profile, account) = profile_for(api, &fresh).await.map_err(api_err)?;
+            Ok((profile, fresh, account))
         }
-        other => other.map(|p| (p, tokens.membership_id.clone())).map_err(api_err),
+        other => other.map(|(p, a)| (p, tokens, a)).map_err(api_err),
     }
 }
 
 /// The profile of the player's Destiny account. Without cross save a player can have several
 /// accounts, so each candidate is tried until one has Destiny 2 data.
-async fn profile_for(api: &BungieApi, tokens: &paraforge_bungie::Tokens) -> Result<RawProfile, ApiError> {
+async fn profile_for(
+    api: &BungieApi,
+    tokens: &paraforge_bungie::Tokens,
+) -> Result<(RawProfile, DestinyMembership), ApiError> {
     let memberships = api.memberships(&tokens.access_token).await?;
     let candidates: Vec<DestinyMembership> = memberships.candidates().into_iter().cloned().collect();
-    for account in &candidates {
-        match api.profile(&tokens.access_token, account).await {
+    for account in candidates {
+        match api.profile(&tokens.access_token, &account).await {
             Err(ApiError::NoDestinyAccount) => continue,
-            other => return other,
+            other => return other.map(|p| (p, account)),
         }
     }
     Err(ApiError::NoDestinyAccount)

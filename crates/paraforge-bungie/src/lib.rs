@@ -3,6 +3,7 @@
 //! Secrets in this crate never implement a revealing `Debug`, so they cannot leak into logs.
 //! See <https://github.com/Bungie-net/api/wiki/OAuth-Documentation>.
 
+pub mod actions;
 pub mod api;
 pub mod inventory;
 pub mod wishlist;

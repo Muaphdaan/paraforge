@@ -26,6 +26,8 @@ type Session = {
   lastSync: { auto: boolean; ok: boolean; newDrops: number } | null;
   clearSyncError: () => void;
   sync: () => Promise<void>;
+  /** Syncs like an automatic sync: no toast, and errors only show in the header. */
+  syncQuietly: () => Promise<void>;
   /** Bumped after every successful sync, so lists know to reload. */
   dataVersion: number;
   context: ScoreContext;
@@ -232,6 +234,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
   // Buttons pass their click event; this wrapper keeps it from being read as `auto`.
   const sync = useCallback(() => runSync(false), [runSync]);
+  const syncQuietly = useCallback(() => runSync(true), [runSync]);
 
   const setSyncPrefs = useCallback((prefs: SyncPrefs) => {
     setSyncPrefsState(prefs);
@@ -311,6 +314,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     lastSync,
     clearSyncError: useCallback(() => setSyncError(null), []),
     sync,
+    syncQuietly,
     dataVersion,
     context,
     setContext,

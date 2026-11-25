@@ -18,6 +18,31 @@ export type AppInfo = {
   /** Why the last god-roll update failed, if it did. */
   god_roll_error: string | null;
   rules: ScoringRules;
+  /** The player's characters from the last sync, most recently played first. Missing before it. */
+  characters?: Character[];
+};
+
+export type Character = {
+  id: string;
+  /** "Titan", "Hunter" or "Warlock". */
+  class: string;
+  light: number;
+  last_played: string;
+  /** bungie.net paths. */
+  emblem: string;
+  emblem_background: string;
+};
+
+/** What `equip_copy` did. */
+export type EquipOutcome = {
+  character: string;
+  moved: boolean;
+  equipped: boolean;
+  /** Bungie actions taken; 0 when it was already equipped as asked. */
+  steps: number;
+  perks_switched: number;
+  /** Perk columns where the copy has none of the roll's perks. */
+  perks_missing: number;
 };
 
 export type ScoringRules = {

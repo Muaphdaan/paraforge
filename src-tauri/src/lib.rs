@@ -1,6 +1,7 @@
 //! The ParaForge desktop shell. The interface talks to the core only through the
 //! allow-listed commands registered below; it never sees sign-in tokens or calls Bungie.
 
+mod actions;
 mod auth;
 mod game;
 mod sync;
@@ -42,6 +43,8 @@ struct AppInfo {
     god_roll_error: Option<String>,
     /// The scoring rules, so Settings can explain the verdict thresholds.
     rules: ScoringRules,
+    /// The player's characters from the last sync, most recently played first.
+    characters: Vec<paraforge_bungie::inventory::Character>,
 }
 
 #[tauri::command]
@@ -62,6 +65,11 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         god_rolls: db.count("curated_roll").map_err(|e| e.to_string())?,
         god_roll_error: db.meta("rolls_error").map_err(|e| e.to_string())?.filter(|e| !e.is_empty()),
         rules: ScoringRules::default(),
+        characters: db
+            .meta(sync::META_CHARACTERS)
+            .map_err(|e| e.to_string())?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
     })
 }
 
@@ -199,6 +207,7 @@ pub fn run() {
             sync::sync_now,
             sync::vault,
             sync::perks,
+            actions::equip_copy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
