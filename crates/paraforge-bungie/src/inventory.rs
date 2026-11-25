@@ -668,6 +668,9 @@ fn read_copy(
         .map(|part| {
             let raw = sockets.sockets.get(part.socket_index as usize).and_then(|s| s.plug_hash).filter(|h| *h != 0);
             let plugged = raw.filter(|h| !part.empty.contains(&PerkHash(*h)));
+            // A picked-up catalyst sits in its socket while its objectives run; it only counts once
+            // the game marks the exotic as masterworked.
+            let plugged = plugged.filter(|_| part.kind != PartKind::Catalyst || item.state & STATE_MASTERWORK != 0);
             let mut options: Vec<PerkHash> = Vec::new();
             if part.kind == PartKind::Origin {
                 let listed = reusable.and_then(|r| r.plugs.get(&part.socket_index.to_string()));

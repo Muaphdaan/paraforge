@@ -144,20 +144,112 @@ fn after_marker(notes: &str, marker: &str) -> String {
     pick.to_string()
 }
 
+/// The masterwork and the mod from a "Recommended MW: Handling, with a Backup Mag mod." phrase.
+/// Curators give the mod inside the masterwork sentence; "your preferred choice of mod" names none.
+fn masterwork_and_mod(notes: &str) -> (String, String) {
+    let lower = notes.to_ascii_lowercase();
+    let Some(at) = lower.find("recommended mw") else { return (String::new(), String::new()) };
+    let rest =
+        notes[at + "recommended mw".len()..].trim_start_matches(|c: char| c == ':' || c == '-' || c.is_whitespace());
+    // The phrase ends at a full stop, a separator or a quoted remark.
+    let end = rest.find(['.', '|', ';', '\u{201c}', '"']).unwrap_or(rest.len());
+    let phrase = rest[..end].trim();
+    let lower = phrase.to_ascii_lowercase();
+    let (mw, modtext) = match lower.find(" with ") {
+        Some(i) => (&phrase[..i], &phrase[i + " with ".len()..]),
+        None => (phrase, ""),
+    };
+    let mut mw = mw.trim().trim_end_matches(',').trim();
+    for stop in [" - ", " (", " tags:"] {
+        if let Some(i) = mw.to_ascii_lowercase().find(stop) {
+            mw = mw[..i].trim();
+        }
+    }
+    let mw = mw.replace('/', " or ").replace("Handing", "Handling");
+    // "Reload" is the Reload Speed masterwork.
+    let mw = mw
+        .split(" or ")
+        .map(|part| if part.trim().eq_ignore_ascii_case("reload") { "Reload Speed" } else { part })
+        .collect::<Vec<_>>()
+        .join(" or ");
+
+    let mut m = modtext.trim();
+    let ml = m.to_ascii_lowercase();
+    if ml.starts_with("your") {
+        m = "";
+    }
+    for stop in [", or ", " or your", " or, ", " depending", ", and ", " for builds", " to boost"] {
+        if let Some(i) = find_outside_brackets(m, stop) {
+            m = m[..i].trim();
+        }
+    }
+    let mut m = m.trim_end_matches(',').trim();
+    for prefix in ["a ", "an ", "the "] {
+        if m.len() > prefix.len() && m[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            m = &m[prefix.len()..];
+        }
+    }
+    for suffix in [" mods", " mod"] {
+        if m.to_ascii_lowercase().ends_with(suffix) {
+            m = m[..m.len() - suffix.len()].trim();
+        }
+    }
+    (capitalise(mw.trim()), capitalise(m))
+}
+
+/// Where `pat` first appears outside round brackets, ignoring case.
+fn find_outside_brackets(text: &str, pat: &str) -> Option<usize> {
+    let lower = text.to_ascii_lowercase();
+    let mut depth = 0i32;
+    for (i, c) in lower.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth <= 0 && lower[i..].starts_with(pat) => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn capitalise(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// Who made the roll: "Constructed by @Name", a u/ or @ handle in the notes, else the section.
 fn curator(notes: &str, source: &str) -> String {
     let handle = |text: &str| -> Option<String> {
         let start = text.find("by @").map(|i| i + 3).or_else(|| text.find("by u/").map(|i| i + 3))?;
-        let name: String = text[start..].chars().take_while(|c| !c.is_whitespace() && !"():,".contains(*c)).collect();
+        let name: String = text[start..].chars().take_while(|c| !c.is_whitespace() && !"():,'".contains(*c)).collect();
+        // Shown as "by Name", one way whether the notes wrote @Name, u/Name or Name.
+        let name = name.trim_start_matches('@').trim_start_matches("u/").to_string();
         (name.len() > 1).then_some(name)
     };
-    // "pandapaxxy (PvE / M+KB): ..." names the curator before the bracket.
+    // The lead-in before the first bracket names the curator: "Constructed by @Name (",
+    // "pandapaxxy (", "Adamsdown_Boy written as at v9.5.6.2 (". A "by @" later in the notes
+    // credits someone else, such as a tier list the curator cites.
+    let head = notes.split_once(" (").map_or("", |(h, _)| h);
     let lead = || -> Option<String> {
-        let (name, _) = notes.split_once(" (")?;
-        let name = name.trim();
+        let name = head.trim();
+        let name = name.split_once(" written as at ").map_or(name, |(n, _)| n.trim());
         (!name.is_empty() && name.len() <= 32 && !name.contains(' ')).then(|| name.to_string())
     };
-    handle(notes).or_else(lead).or_else(|| handle(source)).unwrap_or_else(|| source.to_string())
+    // A section named for its author: "Pandapaxxy's S15 roundup", "u/Mercules904's Massive Breakdown".
+    let owner = || -> Option<String> {
+        let (name, _) = source.split_once("'s ")?;
+        let name = name.trim_start_matches("u/").trim_start_matches('@');
+        (!name.is_empty() && !name.contains(' ')).then(|| name.to_string())
+    };
+    handle(head)
+        .or_else(lead)
+        .or_else(|| handle(notes))
+        .or_else(|| handle(source))
+        .or_else(owner)
+        .unwrap_or_else(|| source.to_string())
 }
 
 /// The notes without their "Constructed by @Name (tags):" lead-in, which ParaForge shows separately.
@@ -213,8 +305,11 @@ pub fn curated_rolls(
     let mut out = Vec::new();
     for block in blocks {
         let (text, tags) = split_tags(&block.notes);
-        let masterwork = after_marker(&text, "Recommended MW");
+        let (masterwork, mw_mod) = masterwork_and_mod(&text);
         let mut mods = after_marker(&text, "Recommended Mod");
+        if mods.is_empty() {
+            mods = mw_mod;
+        }
         if mods.is_empty() {
             mods = spec_mods(&tags).join(" or ");
         }
@@ -331,7 +426,7 @@ dimwishlist:item=100&perks=20,31#notes:Duel roll. Recommended Mod: Targeting tag
         assert_eq!(pve.context, Context::Pve);
         let col = |hashes: &[u32]| hashes.iter().map(|h| PerkHash(*h)).collect::<Vec<_>>();
         assert_eq!(pve.columns, vec![col(&[1, 2]), col(&[10]), col(&[20, 21]), col(&[30, 31])]);
-        assert_eq!(pve.curator, "@Adamsdown_Boy");
+        assert_eq!(pve.curator, "Adamsdown_Boy");
         assert_eq!(pve.masterwork, "Handling or Stability");
         assert_eq!(pve.mods, "Minor Spec");
         assert!(pve.notes.starts_with("First-choice roll."), "{}", pve.notes);
@@ -342,6 +437,59 @@ dimwishlist:item=100&perks=20,31#notes:Duel roll. Recommended Mod: Targeting tag
         assert_eq!(pvp.columns, vec![vec![], vec![], col(&[20]), col(&[31])], "unlisted columns take any perk");
         assert_eq!(pvp.mods, "Targeting");
         assert_eq!(pvp.curator, "PvE Podcast 177 - The Best Trace Rifles");
+    }
+
+    #[test]
+    fn reads_masterwork_and_mod_from_one_sentence() {
+        let mm = |s: &str| masterwork_and_mod(s);
+        assert_eq!(mm("Recommended MW: Handling, with a Backup Mag mod."), ("Handling".into(), "Backup Mag".into()));
+        assert_eq!(
+            mm("Recommended MW: Stability with Targeting Adjuster mod."),
+            ("Stability".into(), "Targeting Adjuster".into())
+        );
+        assert_eq!(mm("Recommended MW - Reload"), ("Reload Speed".into(), String::new()));
+        assert_eq!(
+            mm("Recommended MW: Handling or Stability, with your preferred choice of mod to boost weapon stats."),
+            ("Handling or Stability".into(), String::new())
+        );
+        assert_eq!(
+            mm("Recommended MW: Range with Quick Access Sling or Targeting Adjuster mod depending on play style."),
+            ("Range".into(), "Quick Access Sling or Targeting Adjuster".into())
+        );
+        assert_eq!(
+            mm(
+                "Recommended MW: Handling, with a Backup Mag mod or, when masterworked, Synergy to create Void Breaches."
+            ),
+            ("Handling".into(), "Backup Mag".into())
+        );
+        assert_eq!(
+            mm("Recommended MW: Charge Time, with a Charge Time or Backup Mag mod, or your preferred choice."),
+            ("Charge Time".into(), "Charge Time or Backup Mag".into())
+        );
+        assert_eq!(
+            mm("Recommended MW: Reload Speed, with a damage boosting (Minor or Taken Spec) mod."),
+            ("Reload Speed".into(), "Damage boosting (Minor or Taken Spec)".into())
+        );
+        assert_eq!(
+            mm("Recommended MW: Handling if you don't get Threat Detector and Range if you do."),
+            ("Handling if you don't get Threat Detector and Range if you do".into(), String::new())
+        );
+        assert_eq!(
+            mm("Recommended MW: Range, with a damage-boosting (Minor, Major, or Taken Spec) mod."),
+            ("Range".into(), "Damage-boosting (Minor, Major, or Taken Spec)".into())
+        );
+        assert_eq!(mm("Recommended MW - Handling/Reload"), ("Handling or Reload Speed".into(), String::new()));
+        assert_eq!(mm("No masterwork advice here."), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn curator_comes_from_the_lead_in_not_a_cited_tier_list() {
+        let notes = "Adamsdown_Boy written as at v9.5.6.2 (PvE): rated B-Tier for endgame PvE by @TheAegisRelic.";
+        assert_eq!(curator(notes, "Section"), "Adamsdown_Boy");
+        assert_eq!(curator("Constructed by @Name (PvE): Good roll by @Other.", "Section"), "Name");
+        assert_eq!(curator("pandapaxxy (PvE / M+KB): Great.", "Section"), "pandapaxxy");
+        assert_eq!(curator("A plain note with no lead-in.", "Section"), "Section");
+        assert_eq!(curator("A plain note.", "u/Mercules904's Massive Breakdown"), "Mercules904");
     }
 
     #[test]

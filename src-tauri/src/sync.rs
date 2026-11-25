@@ -28,7 +28,7 @@ const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
 const CATALOG_VERSION: &str = "catalog-5";
 /// Bumped when ParaForge reads more from the god-roll list, so the next sync rebuilds the rolls.
-const ROLLS_VERSION: &str = "rolls-1";
+const ROLLS_VERSION: &str = "rolls-2";
 const META_ROLLS_BUILT: &str = "rolls_built";
 const META_ROLLS_ETAG: &str = "rolls_etag";
 const META_ROLLS_CHECKED: &str = "rolls_checked";
@@ -175,7 +175,11 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
 
     // 2. Curated god rolls, rebuilt when the list or the item database changed.
     progress(&app, "Checking the god-roll list");
-    let (god_rolls, god_roll_error) = update_rolls(&app, &wanted).await?;
+    // God rolls never stop the vault sync: a failure keeps the last good rolls and is reported.
+    let (god_rolls, god_roll_error) = match update_rolls(&app, &wanted).await {
+        Ok(v) => v,
+        Err(e) => (0, Some(e)),
+    };
 
     // 3. The player's weapons.
     progress(&app, "Reading your vault and characters");
@@ -259,26 +263,38 @@ async fn update_rolls(app: &AppHandle, catalog: &str) -> Result<(usize, Option<S
     let mut changed = false;
     let mut error = None;
     let mut new_etag = None;
+    // Whether the check is done for the next six hours: the list answered, or it downloaded but
+    // could not be saved (downloading 30 MB again on every sync would not help).
+    let mut checked_now = false;
     if !have_file || now() - checked >= ROLLS_CHECK_SECS {
         match wishlist::fetch(wishlist::VOLTRON_URL, etag.as_deref().filter(|_| have_file)).await {
-            Ok(Fetched::Unchanged) => {}
+            Ok(Fetched::Unchanged) => checked_now = true,
             Ok(Fetched::New { text, etag }) => {
+                checked_now = true;
                 let part = file.with_extension("part");
-                std::fs::write(&part, text.as_bytes())
-                    .and_then(|_| std::fs::rename(&part, &file))
-                    .map_err(|e| format!("could not save the god-roll list: {e}"))?;
-                new_etag = Some(etag.unwrap_or_default());
-                changed = true;
+                match std::fs::write(&part, text.as_bytes()).and_then(|_| std::fs::rename(&part, &file)) {
+                    Ok(()) => {
+                        new_etag = Some(etag.unwrap_or_default());
+                        changed = true;
+                    }
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&part);
+                        error = Some(format!("could not save the god-roll list: {e}"));
+                    }
+                }
             }
+            // A failed download is tried again on the next sync.
             Err(e) => error = Some(e),
         }
     }
     let state = app.state::<AppState>();
-    if error.is_none() {
+    if checked_now {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.set_meta(META_ROLLS_CHECKED, &now().to_string()).map_err(|e| e.to_string())?;
         if let Some(tag) = &new_etag {
             db.set_meta(META_ROLLS_ETAG, tag).map_err(|e| e.to_string())?;
+            // A new list needs a rebuild until one succeeds, even if the first attempt fails.
+            db.set_meta(META_ROLLS_BUILT, "").map_err(|e| e.to_string())?;
         }
     }
     {

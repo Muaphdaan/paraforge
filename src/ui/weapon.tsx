@@ -175,7 +175,7 @@ const PART_EMPTY: Record<PartKind, string> = {
   origin: "None",
   masterwork: "Not masterworked",
   mod: "No mod",
-  catalyst: "No catalyst yet",
+  catalyst: "Catalyst not finished or not found yet",
 };
 
 /** One part as shown: its kind and the perks in it (both options for a two-choice origin trait). */
