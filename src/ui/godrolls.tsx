@@ -71,24 +71,53 @@ function tagLabels(tags: string[]): string[] {
 
 const isGod = (r: CuratedRoll) => r.tags.some((t) => t.startsWith("god-") || t.endsWith("-god"));
 
-/** How many columns of `roll` a copy satisfies (an empty column always counts). */
-export function rollMatch(roll: CuratedRoll, columns: CopyColumn[] | undefined): number {
-  if (!columns) return 0;
-  return roll.columns.filter((want, i) => want.length === 0 || columns[i]?.options.some((h) => want.includes(h))).length;
+/** The columns of `roll` that name perks, and how many of those a copy has. "Any" columns are left out. */
+export function rollMatch(roll: CuratedRoll, columns: CopyColumn[] | undefined): { matched: number; wanted: number } {
+  let matched = 0;
+  let wanted = 0;
+  roll.columns.forEach((want, i) => {
+    if (want.length === 0) return;
+    wanted += 1;
+    if (columns?.[i]?.options.some((h) => want.includes(h))) matched += 1;
+  });
+  return { matched, wanted };
 }
 
-/** Masterwork and mod picks: the curator's when given, otherwise the most common pick in the list. */
-function picks(roll: CuratedRoll): { masterwork: string; mods: string; mwFromCurator: boolean; modFromCurator: boolean } {
-  const pvp = roll.context === "pvp";
+/** How close a copy is to a roll, from 0 to 1. */
+export const matchShare = (m: { matched: number; wanted: number }) => (m.wanted > 0 ? m.matched / m.wanted : 1);
+
+/** One key per distinct roll: the same roll is stored once for PvE and once for PvP when it suits both. */
+const rollKey = (r: CuratedRoll) => `${r.source}|${r.curator}|${r.title}|${JSON.stringify(r.columns)}`;
+
+function distinct(list: CuratedRoll[]): CuratedRoll[] {
+  const seen = new Set<string>();
+  return list.filter((r) => {
+    const k = rollKey(r);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+type Picks = { masterwork: string; mods: string };
+
+/** The masterwork and mod curators pick most often for this weapon in each mode. */
+function commonPicks(rolls: CuratedRoll[]): Record<ScoreContext, Picks> {
+  const top = (ctx: ScoreContext, key: "masterwork" | "mods") => {
+    const n = new Map<string, number>();
+    for (const r of rolls) if (r.context === ctx && r[key]) n.set(r[key], (n.get(r[key]) ?? 0) + 1);
+    return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+  };
   return {
-    masterwork: roll.masterwork || (pvp ? "Range or Stability" : "Reload Speed or Handling"),
-    mods: roll.mods || (pvp ? "Targeting Adjuster or Counterbalance Stock" : "The Spec mod for your target (Minor, Major or Boss Spec)"),
-    mwFromCurator: Boolean(roll.masterwork),
-    modFromCurator: Boolean(roll.mods),
+    pve: { masterwork: top("pve", "masterwork"), mods: top("pve", "mods") },
+    pvp: { masterwork: top("pvp", "masterwork"), mods: top("pvp", "mods") },
   };
 }
 
 type InputFilter = "all" | "mkb" | "controller";
+
+const inputOk = (r: CuratedRoll, input: InputFilter) =>
+  input === "all" || r.tags.includes(input) || !r.tags.some((t) => t === "mkb" || t === "controller");
 
 export function GodRolls(props: {
   weapon: number;
@@ -97,6 +126,8 @@ export function GodRolls(props: {
   context: ScoreContext;
   /** The copy to compare against; its perks are lit and the closest roll comes first. */
   copy?: CopyColumn[];
+  /** Several owned copies: each roll is compared with the copy that comes closest to it. */
+  copies?: CopyColumn[][];
   /** Show at most this many rolls before "Show all". */
   limit?: number;
   compact?: boolean;
@@ -111,19 +142,32 @@ export function GodRolls(props: {
   const [all, setAll] = useState(false);
   useEffect(() => setContext(props.context), [props.context]);
 
+  const pool = useMemo(() => props.copies ?? (props.copy ? [props.copy] : []), [props.copies, props.copy]);
+  const common = useMemo(() => commonPicks(rolls ?? []), [rolls]);
+
   const shown = useMemo(() => {
-    const list = (rolls ?? [])
-      .filter((r) => context === "all" || r.context === context)
-      .filter((r) => input === "all" || r.tags.includes(input) || !r.tags.some((t) => t === "mkb" || t === "controller"));
+    const base = (rolls ?? []).filter((r) => inputOk(r, input));
+    const list = context === "all" ? distinct(base) : base.filter((r) => r.context === context);
     return list
-      .map((roll, order) => ({ roll, order, match: rollMatch(roll, props.copy) }))
+      .map((roll, order) => {
+        let copy: CopyColumn[] | undefined;
+        let match = { matched: 0, wanted: 0 };
+        for (const c of pool) {
+          const m = rollMatch(roll, c);
+          if (!copy || matchShare(m) > matchShare(match)) {
+            copy = c;
+            match = m;
+          }
+        }
+        return { roll, order, copy, match };
+      })
       .sort(
         (a, b) =>
-          (props.copy ? b.match / b.roll.columns.length - a.match / a.roll.columns.length : 0) ||
+          (pool.length > 0 ? matchShare(b.match) - matchShare(a.match) : 0) ||
           Number(isGod(b.roll)) - Number(isGod(a.roll)) ||
           a.order - b.order,
       );
-  }, [rolls, context, input, props.copy]);
+  }, [rolls, context, input, pool]);
 
   if (error) return <p className="pf-muted">The god rolls could not be read: {error}</p>;
   if (rolls === null) return <p className="pf-muted">Loading god rolls...</p>;
@@ -137,7 +181,12 @@ export function GodRolls(props: {
   }
   const limit = props.limit ?? 4;
   const visible = all ? shown : shown.slice(0, limit);
-  const counts = { pve: rolls.filter((r) => r.context === "pve").length, pvp: rolls.filter((r) => r.context === "pvp").length };
+  const byInput = rolls.filter((r) => inputOk(r, input));
+  const counts = {
+    all: distinct(byInput).length,
+    pve: byInput.filter((r) => r.context === "pve").length,
+    pvp: byInput.filter((r) => r.context === "pvp").length,
+  };
 
   return (
     <div className="pf-godrolls" data-compact={props.compact || undefined}>
@@ -145,7 +194,7 @@ export function GodRolls(props: {
         <div className="pf-chips" role="group" aria-label="Mode">
           {(
             [
-              ["all", `All ${rolls.length}`],
+              ["all", `All ${counts.all}`],
               ["pve", `PvE ${counts.pve}`],
               ["pvp", `PvP ${counts.pvp}`],
             ] as const
@@ -183,14 +232,16 @@ export function GodRolls(props: {
       </div>
       {shown.length === 0 && <p className="pf-muted">No rolls match these filters.</p>}
       <ol className="pf-godrolls__list">
-        {visible.map(({ roll, order, match }) => (
+        {visible.map(({ roll, copy, match }) => (
           <RollCard
-            key={order}
+            key={`${roll.context}|${rollKey(roll)}`}
             roll={roll}
             roles={props.roles}
             perks={props.perks}
-            copy={props.copy}
+            copy={copy}
+            several={pool.length > 1}
             match={match}
+            common={common[roll.context]}
             compact={props.compact}
             onChase={props.onChase}
             chased={props.isChased?.(roll) ?? false}
@@ -204,7 +255,7 @@ export function GodRolls(props: {
       )}
       <p className="pf-muted pf-godrolls__credit">
         Rolls and guides by community curators, from the voltron list (MIT). Masterwork and mod picks marked
-        &ldquo;common pick&rdquo; are ParaForge&rsquo;s, from what curators choose most.
+        &ldquo;common pick&rdquo; are what curators choose most for this weapon.
       </p>
     </div>
   );
@@ -215,7 +266,11 @@ function RollCard(props: {
   roles: ColumnRole[];
   perks: Record<number, Perk>;
   copy?: CopyColumn[];
-  match: number;
+  /** The user owns more than one copy, so the closest one is compared. */
+  several: boolean;
+  match: { matched: number; wanted: number };
+  /** The most common curator picks for this weapon, used when this roll names none. */
+  common: Picks;
   compact?: boolean;
   onChase?: (roll: CuratedRoll) => Promise<void>;
   chased: boolean;
@@ -224,9 +279,10 @@ function RollCard(props: {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const p = picks(roll);
+  const masterwork = roll.masterwork || props.common.masterwork;
+  const mods = roll.mods || props.common.mods;
   const labels = tagLabels(roll.tags);
-  const total = roll.columns.length;
+  const { matched, wanted } = props.match;
   const notes = roll.notes.trim();
   const long = notes.length > 220;
   return (
@@ -241,14 +297,14 @@ function RollCard(props: {
         )}
         <strong className="pf-roll__title">{roll.title || "Curated roll"}</strong>
         {copy && (
-          <span className="pf-roll__match" data-full={props.match === total || undefined}>
-            {props.match === total ? (
+          <span className="pf-roll__match" data-full={matched === wanted || undefined}>
+            {matched === wanted ? (
               <>
                 <Check size={14} strokeWidth={3} aria-hidden="true" />
-                Your copy has it
+                {props.several ? "One of your copies has it" : "Your copy has it"}
               </>
             ) : (
-              `Your copy: ${props.match} of ${total}`
+              `${props.several ? "Your closest copy" : "Your copy"}: ${matched} of ${wanted}`
             )}
           </span>
         )}
@@ -276,22 +332,28 @@ function RollCard(props: {
           </div>
         ))}
       </div>
-      <dl className="pf-roll__picks">
-        <div>
-          <dt>Masterwork</dt>
-          <dd>
-            {p.masterwork}
-            {!p.mwFromCurator && <span className="pf-roll__src">common pick</span>}
-          </dd>
-        </div>
-        <div>
-          <dt>Mod</dt>
-          <dd>
-            {p.mods}
-            {!p.modFromCurator && <span className="pf-roll__src">common pick</span>}
-          </dd>
-        </div>
-      </dl>
+      {(masterwork || mods) && (
+        <dl className="pf-roll__picks">
+          {masterwork && (
+            <div>
+              <dt>Masterwork</dt>
+              <dd>
+                {masterwork}
+                {!roll.masterwork && <span className="pf-roll__src">common pick</span>}
+              </dd>
+            </div>
+          )}
+          {mods && (
+            <div>
+              <dt>Mod</dt>
+              <dd>
+                {mods}
+                {!roll.mods && <span className="pf-roll__src">common pick</span>}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
       {labels.length > 0 && (
         <div className="pf-roll__tags">
           {labels.map((l) => (

@@ -6,7 +6,7 @@ import { ArrowRight, Check, Copy, Inbox, RotateCcw, Trash2 } from "lucide-react"
 import { CopyMark, ROLE_LABELS, VaultRow, byMeta, reasonText } from "../app/api";
 import { useSession } from "../app/session";
 import { timeAgo, useNow } from "../app/time";
-import { rollMatch, useGodRolls } from "../ui/godrolls";
+import { matchShare, rollMatch, useGodRolls } from "../ui/godrolls";
 import { EmptyState, TierPill, VerdictPill } from "../ui/parts";
 import { BungieImage, ElementIcon, MetaMark, PerkIcon } from "../ui/weapon";
 
@@ -184,7 +184,8 @@ function DropCard(props: {
     let top: { matched: number; total: number; title: string } | null = null;
     for (const r of mine) {
       const m = rollMatch(r, row.columns);
-      if (!top || m / r.columns.length > top.matched / top.total) top = { matched: m, total: r.columns.length, title: r.title };
+      if (m.wanted > 0 && (!top || matchShare(m) > top.matched / top.total))
+        top = { matched: m.matched, total: m.wanted, title: r.title };
     }
     return top;
   }, [rolls, row.columns, session.context]);

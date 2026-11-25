@@ -30,7 +30,11 @@ const PREFS_KEY = "paraforge.vaultPrefs.v2";
 function readPrefs(): { view: View; group: GroupBy; sort: SortBy } {
   const fallback = { view: "grid" as View, group: "meta" as GroupBy, sort: "score" as SortBy };
   try {
-    return { ...fallback, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+    const saved = localStorage.getItem(PREFS_KEY);
+    if (saved) return { ...fallback, ...JSON.parse(saved) };
+    // Carry the view and sort over from before meta first existed; only the grouping starts fresh.
+    const { view, sort } = JSON.parse(localStorage.getItem("paraforge.vaultPrefs") ?? "{}");
+    return { ...fallback, ...(view ? { view } : {}), ...(sort ? { sort } : {}) };
   } catch {
     return fallback;
   }
@@ -46,7 +50,15 @@ const kept: { query: string; verdict: Verdict | "all"; filters: WeaponFilters; f
 
 type Section = { key: string; title: string; groups: { key: string; title: string | null; rows: VaultRow[] }[] };
 
+const tierRank = (r: VaultRow) => META_TIER_ORDER.indexOf(metaTier(r.meta));
+
+/** Meta picks first and normal weapons last, then the chosen sort. */
 function compare(sort: SortBy) {
+  const inner = innerCompare(sort);
+  return (a: VaultRow, b: VaultRow) => tierRank(a) - tierRank(b) || inner(a, b);
+}
+
+function innerCompare(sort: SortBy) {
   return (a: VaultRow, b: VaultRow) => {
     if (sort === "name") return a.name.localeCompare(b.name) || b.tier - a.tier;
     if (sort === "tier") return b.tier - a.tier || (b.score?.score ?? -1) - (a.score?.score ?? -1);

@@ -43,7 +43,11 @@ const PREFS_KEY = "paraforge.codexPrefs.v2";
 function readPrefs(): { group: GroupBy; rarity: Rarity } {
   const fallback = { group: "meta" as GroupBy, rarity: "all" as Rarity };
   try {
-    return { ...fallback, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+    const saved = localStorage.getItem(PREFS_KEY);
+    if (saved) return { ...fallback, ...JSON.parse(saved) };
+    // Carry the rarity filter over from before meta first existed; only the grouping starts fresh.
+    const { rarity } = JSON.parse(localStorage.getItem("paraforge.codexPrefs") ?? "{}");
+    return { ...fallback, ...(rarity ? { rarity } : {}) };
   } catch {
     return fallback;
   }
@@ -538,7 +542,7 @@ function CodexDetail(props: {
               roles={row.roles}
               perks={perks}
               context={session.context}
-              copy={best?.columns}
+              copies={copies.map((c) => c.columns)}
               limit={3}
               compact
               onChase={(roll) => chase.add(row.hash, roll.columns).then(() => undefined)}
