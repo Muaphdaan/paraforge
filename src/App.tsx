@@ -14,6 +14,7 @@ import { FirstRun } from "./pages/FirstRun";
 import { WeaponPage } from "./pages/WeaponPage";
 import { SearchPalette } from "./shell/SearchPalette";
 import { CONTEXTS } from "./app/api";
+import { TriagePage } from "./pages/TriagePage";
 import { VaultPage } from "./pages/VaultPage";
 import { Header } from "./shell/Header";
 import { Sidebar } from "./shell/Sidebar";
@@ -98,7 +99,7 @@ function Shell() {
     }
   }, [collapsed]);
 
-  // Ctrl+K searches, Ctrl+B collapses the sidebar, Ctrl+1 to Ctrl+6 open the sections, Alt+Left goes back.
+  // Ctrl+K searches, Ctrl+B collapses the sidebar, Ctrl+1 to Ctrl+7 open the sections, Alt+Left goes back.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // Ctrl+F too, so it opens ParaForge's search rather than the web view's find bar.
@@ -108,7 +109,7 @@ function Shell() {
       } else if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
         e.preventDefault();
         toggleSidebar();
-      } else if (e.ctrlKey && !e.altKey && /^[1-6]$/.test(e.key)) {
+      } else if (e.ctrlKey && !e.altKey && /^[1-7]$/.test(e.key)) {
         e.preventDefault();
         setSearchOpen(false);
         navigate(PAGE_ORDER[Number(e.key) - 1]);
@@ -171,6 +172,7 @@ function Shell() {
                   onOpenWeapon={openWeaponPage}
                 />
               )}
+              {page === "triage" && <TriagePage onOpenWeapon={openWeaponPage} />}
               {page === "chase" && (
                 <ChasePage onNavigate={navigate} onOpenInCodex={openInCodex} onOpenWeapon={openWeaponPage} />
               )}

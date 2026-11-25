@@ -170,6 +170,16 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE curated_roll ADD COLUMN detail TEXT NOT NULL DEFAULT '';
     ALTER TABLE curated_roll ADD COLUMN origin TEXT NOT NULL DEFAULT '';
     "#,
+    // 8: when each copy first showed up (0 for the first sync's baseline), and the player's
+    // keep / shard decisions from the new drops review and duplicate triage
+    r#"
+    ALTER TABLE weapon_copy ADD COLUMN first_seen TEXT NOT NULL DEFAULT '0';
+    CREATE TABLE copy_mark (
+        instance_id TEXT PRIMARY KEY,
+        mark        TEXT NOT NULL CHECK (mark IN ('keep', 'shard', 'seen')),
+        marked_at   TEXT NOT NULL
+    );
+    "#,
 ];
 
 const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools, parts";
@@ -414,12 +424,18 @@ impl Database {
             stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?
                 .collect::<rusqlite::Result<_>>()?
         };
+        let seen: HashMap<String, String> = {
+            let mut stmt = tx.prepare("SELECT instance_id, first_seen FROM weapon_copy")?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        // The first sync is the baseline: nothing in it counts as a new drop.
+        let baseline = seen.is_empty();
         tx.execute("DELETE FROM weapon_copy", [])?;
         {
             let mut insert = tx.prepare(
                 "INSERT INTO weapon_copy(instance_id, weapon_hash, tier, columns, masterworked, locked, synced_at,
-                     stats, location, parts)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     stats, location, parts, first_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             let mut stale = tx.prepare("DELETE FROM copy_score WHERE instance_id = ?1")?;
             for c in copies {
@@ -438,12 +454,14 @@ impl Database {
                     synced_at,
                     serde_json::to_string(&c.stats)?,
                     c.location.as_str(),
-                    serde_json::to_string(&c.parts)?
+                    serde_json::to_string(&c.parts)?,
+                    seen.get(&c.instance_id).map_or(if baseline { "0" } else { synced_at }, String::as_str)
                 ])?;
             }
         }
-        // Keep scores only for copies still owned.
+        // Keep scores and decisions only for copies still owned.
         tx.execute("DELETE FROM copy_score WHERE instance_id NOT IN (SELECT instance_id FROM weapon_copy)", [])?;
+        tx.execute("DELETE FROM copy_mark WHERE instance_id NOT IN (SELECT instance_id FROM weapon_copy)", [])?;
         tx.commit()?;
         Ok(())
     }
@@ -582,6 +600,26 @@ impl Database {
         Ok(out)
     }
 
+    /// Records the player's decision on a copy ("keep", "shard" or "seen"), or clears it with `None`.
+    pub fn set_mark(&self, instance_id: &str, mark: Option<&str>, at: &str) -> Result<()> {
+        match mark {
+            Some(m) => {
+                if !["keep", "shard", "seen"].contains(&m) {
+                    return Err(DbError::Corrupt(format!("unknown mark {m:?}")));
+                }
+                self.conn.execute(
+                    "INSERT INTO copy_mark(instance_id, mark, marked_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(instance_id) DO UPDATE SET mark = excluded.mark, marked_at = excluded.marked_at",
+                    params![instance_id, m, at],
+                )?;
+            }
+            None => {
+                self.conn.execute("DELETE FROM copy_mark WHERE instance_id = ?1", [instance_id])?;
+            }
+        }
+        Ok(())
+    }
+
     /// How many separate wish-list sections recommend each weapon: ParaForge's meta measure
     /// (curator consensus). Weapons no curator lists are missing from the map.
     pub fn meta_counts(&self) -> Result<HashMap<WeaponHash, u32>> {
@@ -691,9 +729,10 @@ impl Database {
     pub fn vault_rows(&self, context: Context) -> Result<Vec<VaultRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.instance_id, c.weapon_hash, w.name, w.type_name, c.tier, c.masterworked, c.locked, s.detail,
-                    w.look, w.columns, c.columns, c.stats, c.location, c.parts
+                    w.look, w.columns, c.columns, c.stats, c.location, c.parts, c.first_seen, m.mark
              FROM weapon_copy c
              JOIN weapon w ON w.hash = c.weapon_hash
+             LEFT JOIN copy_mark m ON m.instance_id = c.instance_id
              LEFT JOIN copy_score s ON s.instance_id = c.instance_id AND s.context = ?1
              ORDER BY s.score IS NULL, s.score DESC, w.name, c.instance_id",
         )?;
@@ -713,6 +752,8 @@ impl Database {
                 r.get::<_, String>(11)?,
                 r.get::<_, String>(12)?,
                 r.get::<_, String>(13)?,
+                r.get::<_, String>(14)?,
+                r.get::<_, Option<String>>(15)?,
             ))
         })?;
         let meta = self.meta_counts()?;
@@ -733,6 +774,8 @@ impl Database {
                 stats,
                 location,
                 parts,
+                first_seen,
+                mark,
             ) = row?;
             out.push(VaultRow {
                 instance_id,
@@ -750,6 +793,8 @@ impl Database {
                 location: CopyLocation::parse(&location),
                 parts: serde_json::from_str(&parts)?,
                 meta: meta.get(&WeaponHash(weapon)).copied().unwrap_or(0),
+                first_seen: first_seen.parse().unwrap_or(0),
+                mark,
             });
         }
         Ok(out)
@@ -812,6 +857,10 @@ pub struct VaultRow {
     pub parts: Vec<CopyPart>,
     /// How many curator sources recommend this weapon; 0 for none.
     pub meta: u32,
+    /// When ParaForge first saw this copy, Unix seconds; 0 for copies from the first sync.
+    pub first_seen: i64,
+    /// The player's decision: "keep", "shard" or "seen" (reviewed, no decision).
+    pub mark: Option<String>,
 }
 
 fn parse_context(value: &str) -> Result<Context> {

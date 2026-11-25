@@ -1,6 +1,6 @@
-import { BookOpen, SquareCheckBig, Home, Layers, LucideIcon, Archive, Settings } from "lucide-react";
+import { BookOpen, SquareCheckBig, Home, Inbox, Layers, LucideIcon, Archive, Settings } from "lucide-react";
 
-export type PageId = "home" | "vault" | "codex" | "chase" | "collections" | "settings" | "weapon";
+export type PageId = "home" | "vault" | "codex" | "triage" | "chase" | "collections" | "settings" | "weapon";
 
 export type PageDef = {
   id: PageId;
@@ -37,6 +37,14 @@ export const PAGES: Record<PageId, PageDef> = {
     group: "Armoury",
     title: "Codex",
     subtitle: "Every weapon in the game and its best rolls.",
+  },
+  triage: {
+    id: "triage",
+    label: "Triage",
+    icon: Inbox,
+    group: "Armoury",
+    title: "Triage",
+    subtitle: "Keep or shard your new drops, and pick the best copy of each weapon.",
   },
   chase: {
     id: "chase",
@@ -75,9 +83,9 @@ export const PAGES: Record<PageId, PageDef> = {
 
 export const NAV_GROUPS: { label: string; pages: PageId[] }[] = [
   { label: "Overview", pages: ["home"] },
-  { label: "Armoury", pages: ["vault", "codex"] },
+  { label: "Armoury", pages: ["vault", "codex", "triage"] },
   { label: "Progress", pages: ["chase", "collections"] },
 ];
 
-/** Ctrl+1 to Ctrl+6 jump to these, in sidebar order. */
-export const PAGE_ORDER: PageId[] = ["home", "vault", "codex", "chase", "collections", "settings"];
+/** Ctrl+1 to Ctrl+7 jump to these, in sidebar order. */
+export const PAGE_ORDER: PageId[] = ["home", "vault", "codex", "triage", "chase", "collections", "settings"];

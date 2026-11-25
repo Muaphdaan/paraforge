@@ -3,7 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppInfo, AuthStatus, Perk, ScoreContext, SyncSummary, VaultRow } from "./api";
+import type { AppInfo, AuthStatus, CopyMark, Perk, ScoreContext, SyncSummary, VaultRow } from "./api";
 
 type Session = {
   info: AppInfo | null;
@@ -39,6 +39,8 @@ type Session = {
   playing: boolean;
   /** The first app_info read has finished, whether or not it worked. */
   infoLoaded: boolean;
+  /** Saves a keep / shard decision on a copy (null clears it) and updates the vault in place. */
+  markCopy: (instanceId: string, mark: CopyMark | null) => Promise<void>;
 };
 
 export type SyncPrefs = {
@@ -277,6 +279,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [canSync, syncPrefs, syncedAt, runSync]);
 
+  const markCopy = useCallback(async (instanceId: string, mark: CopyMark | null) => {
+    await invoke("mark_copy", { instanceId, mark });
+    setLoaded((l) =>
+      l ? { ...l, rows: l.rows.map((r) => (r.instance_id === instanceId ? { ...r, mark } : r)) } : l,
+    );
+  }, []);
+
   const value: Session = {
     info,
     auth,
@@ -302,6 +311,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setSyncPrefs,
     playing,
     infoLoaded,
+    markCopy,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

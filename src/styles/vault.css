@@ -597,6 +597,9 @@
   overflow: auto;
 }
 
+/* Keep every block at its natural height; the body scrolls instead of squashing them. */
+.pf-detail__body > * { flex-shrink: 0; }
+
 .pf-detail__chips {
   display: flex;
   flex-wrap: wrap;
@@ -907,3 +910,18 @@
 }
 
 .pf-chipbtn--icon { display: inline-flex; align-items: center; gap: 6px; }
+
+.pf-tile__shard {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--shard);
+  color: var(--on-accent);
+}
+
+.pf-tile[data-mark="shard"] .pf-tile__icon { opacity: 0.6; }

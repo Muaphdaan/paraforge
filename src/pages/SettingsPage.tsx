@@ -375,9 +375,11 @@ function DataCard() {
 
 const SHORTCUTS: [string, string][] = [
   ["Ctrl + K", "Search weapons and perks"],
-  ["Ctrl + 1 to 6", "Home, Vault, Codex, Chase list, Collections, Settings"],
+  ["Ctrl + 1 to 7", "Home, Vault, Codex, Triage, Chase list, Collections, Settings"],
   ["Ctrl + B", "Collapse or expand the sidebar"],
   ["Alt + Left", "Back"],
+  ["K / S / L", "Triage: keep, shard or later for the new drop on screen"],
+  ["Ctrl + F", "Search (same as Ctrl + K)"],
   ["Esc", "Close search or a menu"],
 ];
 

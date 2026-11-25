@@ -1,7 +1,7 @@
 // Weapon pieces shared by Vault and Home: the icon tile, element and ammo badges, perk icons.
 // Icons and screenshots come from Bungie's servers (bungie.net), like DIM and light.gg.
 import { useState } from "react";
-import { Circle, Crown, Hexagon, Lock, Snowflake, Spline, Sun, Zap } from "lucide-react";
+import { Circle, Crown, Hexagon, Lock, Snowflake, Spline, Sun, Trash2, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AMMO, CopyPart, ELEMENTS, PartKind, Perk, VaultRow, WeaponPart, bungieImage, metaTier, metaTip } from "../app/api";
 
@@ -77,6 +77,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
     row.score ? `score ${row.score.score.toFixed(0)}, ${VERDICT_LABEL[row.score.verdict]}` : "not scored",
     row.locked ? "locked" : null,
     metaTier(row.meta) === "meta" ? "meta pick" : null,
+    row.mark === "shard" ? "marked to shard" : row.mark === "keep" ? "marked to keep" : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -87,6 +88,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
       data-rarity={row.look.rarity}
       data-instance={row.instance_id}
       data-masterworked={row.masterworked || undefined}
+      data-mark={row.mark ?? undefined}
       aria-pressed={props.selected}
       aria-label={label}
       data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.tier > 0 ? ` · Tier ${row.tier}` : ""}${row.score ? ` · ${row.score.score.toFixed(0)} ${VERDICT_LABEL[row.score.verdict]}` : ""}${row.meta ? `\n${metaTip(row.meta)}` : ""}`}
@@ -104,6 +106,11 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
           </span>
         )}
         <MetaMark meta={row.meta} />
+        {row.mark === "shard" && (
+          <span className="pf-tile__shard" aria-hidden="true">
+            <Trash2 size={10} strokeWidth={2.5} />
+          </span>
+        )}
       </span>
       <span className="pf-tile__bar" aria-hidden="true">
         <span className="pf-tile__element">

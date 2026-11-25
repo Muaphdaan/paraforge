@@ -199,7 +199,8 @@ kbd {
 
 .pf-chipbtn:hover { border-color: #7480c9; }
 
-.pf-chipbtn[aria-pressed="true"] {
+.pf-chipbtn[aria-pressed="true"],
+.pf-chipbtn[aria-selected="true"] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
@@ -1292,3 +1293,78 @@ kbd {
 
 .pf-roll__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .pf-roll__error { margin: 0; color: var(--shard); font-size: var(--text-label); }
+
+/* ---------- Triage: new drops and duplicates ---------- */
+.pf-triage { display: flex; flex-direction: column; gap: var(--gap); }
+.pf-triage .pf-chipbtn { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pf-triage__drops, .pf-triage__dupes { display: flex; flex-direction: column; gap: var(--gap); }
+
+.pf-drop { display: flex; flex-direction: column; gap: var(--space-4); }
+.pf-drop[data-rarity="6"] { border-color: rgb(232 197 71 / 0.5); }
+.pf-drop__head { display: flex; align-items: center; gap: var(--space-4); }
+.pf-drop__icon { position: relative; width: 96px; height: 96px; flex: none; }
+.pf-drop__title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pf-drop__title h2 { margin: 0; font-size: var(--text-page-title); }
+.pf-drop__body { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: var(--space-4); }
+.pf-drop__perks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); align-content: start; }
+.pf-drop__col { display: flex; flex-direction: column; gap: 6px; }
+
+.pf-drop__advice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--keep);
+  border-radius: var(--radius-card);
+  background: rgb(61 245 168 / 0.08);
+}
+.pf-drop__advice[data-mark="shard"] { border-color: var(--shard); background: rgb(255 77 94 / 0.08); }
+.pf-drop__advice p { margin: 0; }
+.pf-drop__verdict { font-size: 22px; color: var(--keep); }
+.pf-drop__advice[data-mark="shard"] .pf-drop__verdict { color: var(--shard); }
+.pf-drop__facts { margin: 0; padding-left: 18px; color: var(--text-muted); font-size: var(--text-label); }
+
+.pf-drop__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pf-drop__actions kbd {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.8;
+}
+.pf-drop__open { margin-left: auto; }
+.pf-drop__note { margin: 0; font-size: var(--text-caption); }
+
+.pf-triage__queue, .pf-triage__reviewed { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.pf-triage__reviewed { flex-direction: column; }
+.pf-triage__reviewed li { display: flex; align-items: center; gap: var(--space-3); }
+.pf-minicopy { display: inline-flex; align-items: center; gap: var(--space-2); padding: 4px 10px 4px 4px; border: 1px solid var(--border); border-radius: var(--radius-card); }
+.pf-minicopy .pf-wrow__icon { width: 32px; height: 32px; }
+.pf-minicopy__name { font-weight: 700; }
+
+.pf-markpill { padding: 0 10px; border: 1px solid var(--control-outline); border-radius: var(--radius-pill); font-size: var(--text-label); font-weight: 700; }
+.pf-markpill--keep { border-color: var(--keep); color: var(--keep); }
+.pf-markpill--shard { border-color: var(--shard); color: var(--shard); }
+
+.pf-dupe { display: flex; flex-direction: column; gap: var(--space-3); }
+.pf-dupe__head { display: flex; align-items: center; gap: var(--space-3); }
+.pf-dupe__head .pf-wrow__name { flex: 1; }
+.pf-dupe__list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pf-dupe__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.pf-dupe__copy[data-mark="shard"] { border-color: rgb(255 77 94 / 0.5); opacity: 0.75; }
+.pf-dupe__perks { flex: 1 1 260px; min-width: 0; color: var(--text-muted); font-size: var(--text-label); }
+.pf-dupe__marks { display: inline-flex; gap: 6px; }
+.pf-chipbtn--danger[aria-pressed="true"] { border-color: var(--shard); background: var(--shard); color: var(--on-accent); }
+
+@media (max-width: 1100px) {
+  .pf-drop__body { grid-template-columns: 1fr; }
+}

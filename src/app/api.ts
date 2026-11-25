@@ -150,7 +150,13 @@ export type VaultRow = {
   parts?: CopyPart[];
   /** How many curator sources recommend this weapon (ParaForge's meta measure); 0 for none. */
   meta?: number;
+  /** When ParaForge first saw this copy, Unix seconds; 0 for copies from the first sync. */
+  first_seen?: number;
+  /** Your decision from the new drops review or duplicate triage. */
+  mark?: CopyMark | null;
 };
+
+export type CopyMark = "keep" | "shard" | "seen";
 
 export type CopyLocation = "vault" | "inventory" | "equipped";
 

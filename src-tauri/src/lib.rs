@@ -86,6 +86,19 @@ fn god_rolls(state: State<'_, AppState>, weapon: u32) -> Result<Vec<paraforge_co
     db.rolls_for(paraforge_core::WeaponHash(weapon)).map_err(|e| e.to_string())
 }
 
+/// Records a keep / shard decision on a copy ("keep", "shard" or "seen"), or clears it with null.
+/// These are ParaForge notes: nothing changes in the game.
+#[tauri::command]
+fn mark_copy(state: State<'_, AppState>, instance_id: String, mark: Option<String>) -> Result<(), String> {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.set_mark(&instance_id, mark.as_deref(), &at).map_err(|e| e.to_string())
+}
+
 /// The rolls the player is hunting.
 #[tauri::command]
 fn chase_list(state: State<'_, AppState>) -> Result<Vec<ChaseRoll>, String> {
@@ -172,6 +185,7 @@ pub fn run() {
             weapon,
             codex,
             god_rolls,
+            mark_copy,
             chase_list,
             chase_add,
             chase_remove,

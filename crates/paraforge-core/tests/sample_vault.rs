@@ -235,7 +235,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 7);
+    assert_eq!(db.schema_version().unwrap(), 8);
 
     let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     defs[0].look = WeaponLook {
@@ -363,7 +363,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 7);
+    assert_eq!(db.schema_version().unwrap(), 8);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();
@@ -397,4 +397,41 @@ fn empty_columns_lower_confidence() {
     }
     let out = score_vault(&f.defs, &[c], Context::Pve, &ratings(), &f.rolls, &ScoringRules::default());
     assert_eq!(out.scores[0].confidence, 0.0);
+}
+
+#[test]
+fn new_drops_and_marks() {
+    let f = fixture();
+    let mut db = Database::open_in_memory().unwrap();
+    let defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    db.upsert_weapons(&defs).unwrap();
+    let perks = [BARREL_GOOD, MAG_GOOD, TRAIT_TOP_A, TRAIT_TOP_B];
+    let a = copy("a", 1, 3, perks, [false; 4], false);
+    let b = copy("b", 1, 3, perks, [false; 4], false);
+    let c = copy("c", 2, 3, perks, [false; 4], false);
+
+    // The first sync is the baseline: nothing in it is a new drop.
+    db.replace_copies(&[a.clone(), b.clone()], "100").unwrap();
+    let seen = |db: &Database| -> HashMap<String, (i64, Option<String>)> {
+        db.vault_rows(Context::Pve).unwrap().into_iter().map(|r| (r.instance_id, (r.first_seen, r.mark))).collect()
+    };
+    assert!(seen(&db).values().all(|(t, _)| *t == 0));
+
+    // A later sync stamps only the copy it has not seen before; old copies keep their stamp.
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "200").unwrap();
+    db.set_mark("b", Some("shard"), "210").unwrap();
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "300").unwrap();
+    let rows = seen(&db);
+    assert_eq!(rows["c"], (200, None));
+    assert_eq!(rows["a"].0, 0);
+    assert_eq!(rows["b"].1.as_deref(), Some("shard"));
+
+    // Clearing works, unknown marks are refused, and a dismantled copy loses its mark.
+    db.set_mark("b", None, "310").unwrap();
+    assert!(db.set_mark("a", Some("favourite"), "310").is_err());
+    db.set_mark("a", Some("keep"), "320").unwrap();
+    db.replace_copies(&[b, c], "400").unwrap();
+    db.replace_copies(&[a, copy("d", 2, 3, perks, [false; 4], false)], "500").unwrap();
+    let rows = seen(&db);
+    assert_eq!(rows["a"], (500, None), "a copy that left and came back is new again, without its old mark");
 }
