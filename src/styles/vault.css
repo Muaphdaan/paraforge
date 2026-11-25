@@ -879,3 +879,31 @@
   .pf-wrow { grid-template-columns: 48px minmax(120px, 1fr) 48px 40px 104px; }
   .pf-wrow__perks { display: none; }
 }
+
+/* ---------- Advanced filters ---------- */
+.pf-filterbtn { position: relative; }
+.pf-filterbtn[aria-expanded="true"] { border-color: var(--accent); }
+.pf-filterbtn__count { background: var(--accent); color: var(--on-accent); }
+
+.pf-filterpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: rgb(11 13 31 / 0.35);
+}
+
+.pf-filterpanel__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.pf-filterpanel__row--controls { gap: var(--space-3) var(--space-4); }
+.pf-filterpanel__label {
+  min-width: 64px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pf-chipbtn--icon { display: inline-flex; align-items: center; gap: 6px; }

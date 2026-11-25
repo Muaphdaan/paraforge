@@ -7,6 +7,7 @@ import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
 import { Dropdown, EmptyState, TierPill, VerdictPill } from "../ui/parts";
 import { BungieImage, ElementIcon, PerkIcon, WeaponTile } from "../ui/weapon";
+import { FilterButton, FilterPanel, NO_FILTERS, WeaponFilters, activeFilters, applyFilters } from "../ui/filters";
 import { WeaponDetail } from "./WeaponDetail";
 
 type View = "grid" | "list";
@@ -36,7 +37,12 @@ function readPrefs(): { view: View; group: GroupBy; sort: SortBy } {
 }
 
 // Search and verdict filter survive leaving the Vault (for a weapon page, say) until the app closes.
-const kept: { query: string; verdict: Verdict | "all" } = { query: "", verdict: "all" };
+const kept: { query: string; verdict: Verdict | "all"; filters: WeaponFilters; filtersOpen: boolean } = {
+  query: "",
+  verdict: "all",
+  filters: NO_FILTERS,
+  filtersOpen: false,
+};
 
 type Section = { key: string; title: string; groups: { key: string; title: string | null; rows: VaultRow[] }[] };
 
@@ -126,10 +132,15 @@ export function VaultPage({
   const searchId = useId();
   const [query, setQuery] = useState(kept.query);
   const [verdict, setVerdict] = useState<Verdict | "all">(kept.verdict);
+  const [filters, setFilters] = useState<WeaponFilters>(kept.filters);
+  const [filtersOpen, setFiltersOpen] = useState(kept.filtersOpen);
+  const filterPanelId = useId();
   useEffect(() => {
     kept.query = query;
     kept.verdict = verdict;
-  }, [query, verdict]);
+    kept.filters = filters;
+    kept.filtersOpen = filtersOpen;
+  }, [query, verdict, filters, filtersOpen]);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
 
   useEffect(() => {
@@ -142,10 +153,11 @@ export function VaultPage({
 
   const rows = session.vault;
   const words = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
-  const searched = useMemo(
+  const matched = useMemo(
     () => (rows ?? []).filter((r) => matches(r, words, session.perks)),
     [rows, words, session.perks],
   );
+  const searched = useMemo(() => applyFilters(matched, filters, session.perks), [matched, filters, session.perks]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: searched.length };
     for (const r of searched) if (r.score) c[r.score.verdict] = (c[r.score.verdict] ?? 0) + 1;
@@ -166,6 +178,7 @@ export function VaultPage({
     if (!visible.some((r) => r.instance_id === initialSelectedId)) {
       setQuery("");
       setVerdict("all");
+      setFilters(NO_FILTERS);
       return; // runs again with the unfiltered list
     }
     revealed.current = true;
@@ -277,7 +290,18 @@ export function VaultPage({
               <span className="pf-visually-hidden">List</span>
             </button>
           </div>
+          <FilterButton
+            open={filtersOpen}
+            count={activeFilters(filters)}
+            onClick={() => setFiltersOpen(!filtersOpen)}
+            controls={filterPanelId}
+          />
         </div>
+        {filtersOpen && (
+          <div id={filterPanelId}>
+            <FilterPanel rows={matched} value={filters} onChange={setFilters} perks={session.perks} />
+          </div>
+        )}
 
         <div className="pf-filters" role="group" aria-label="Filter by verdict">
           {(["all", "keep", "upgrade", "replace", "shard"] as const).map((v) => (
@@ -311,6 +335,7 @@ export function VaultPage({
                   onClick={() => {
                     setQuery("");
                     setVerdict("all");
+                    setFilters(NO_FILTERS);
                   }}
                 >
                   Clear filters

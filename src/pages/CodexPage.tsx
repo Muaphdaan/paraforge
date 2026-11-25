@@ -18,6 +18,7 @@ import {
 import { sameRoll, useChase } from "../app/chase";
 import { useCodex } from "../app/codex";
 import { useSession } from "../app/session";
+import { FilterButton, FilterPanel, NO_FILTERS, WeaponFilters, activeFilters, applyFilters } from "../ui/filters";
 import { GodRolls } from "../ui/godrolls";
 import { Banner, Dropdown, EmptyState } from "../ui/parts";
 import {
@@ -57,7 +58,17 @@ const kept: {
   picks: { hash: number; picks: number[][] } | null;
   /** The last open request handled, so coming Back to the Codex keeps the selection made since. */
   focusToken: number | undefined;
-} = { query: "", owned: "all", selectedHash: null, picks: null, focusToken: undefined };
+  filters: WeaponFilters;
+  filtersOpen: boolean;
+} = {
+  query: "",
+  owned: "all",
+  selectedHash: null,
+  picks: null,
+  focusToken: undefined,
+  filters: NO_FILTERS,
+  filtersOpen: false,
+};
 
 type Group = { key: string; title: string | null; rows: CodexRow[] };
 type Section = { key: string; title: string; groups: Group[] };
@@ -123,6 +134,13 @@ export function CodexPage(props: {
   const [prefs, setPrefs] = useState(readPrefs);
   const [query, setQuery] = useState(kept.query);
   const [owned, setOwned] = useState<Owned>(kept.owned);
+  const [filters, setFilters] = useState<WeaponFilters>(kept.filters);
+  const [filtersOpen, setFiltersOpen] = useState(kept.filtersOpen);
+  const filterPanelId = useId();
+  useEffect(() => {
+    kept.filters = filters;
+    kept.filtersOpen = filtersOpen;
+  }, [filters, filtersOpen]);
   const [selectedHash, setSelectedHash] = useState<number | null>(props.initialHash ?? kept.selectedHash);
   useEffect(() => {
     kept.query = query;
@@ -155,13 +173,14 @@ export function CodexPage(props: {
     [codex.rows, session.perks],
   );
   const words = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
-  const searched = useMemo(
+  const matched = useMemo(
     () =>
       indexed
         .filter(({ row, text }) => (prefs.rarity === "all" || String(row.look.rarity) === prefs.rarity) && words.every((w) => text.includes(w)))
         .map(({ row }) => row),
     [indexed, words, prefs.rarity],
   );
+  const searched = useMemo(() => applyFilters(matched, filters, session.perks), [matched, filters, session.perks]);
   const counts = useMemo(() => {
     const have = searched.filter((r) => r.owned > 0).length;
     return { all: searched.length, owned: have, missing: searched.length - have };
@@ -184,6 +203,7 @@ export function CodexPage(props: {
     // Hidden by a filter: clear them, and this runs again with the tile on screen.
     setQuery("");
     setOwned("all");
+    setFilters(NO_FILTERS);
     setPrefs((p) => (p.rarity === "all" || String(row.look.rarity) === p.rarity ? p : { ...p, rarity: "all" }));
   }, [reveal, sections, byHash]);
 
@@ -263,7 +283,18 @@ export function CodexPage(props: {
             ]}
             onChange={(group) => setPrefs((p) => ({ ...p, group }))}
           />
+          <FilterButton
+            open={filtersOpen}
+            count={activeFilters(filters)}
+            onClick={() => setFiltersOpen(!filtersOpen)}
+            controls={filterPanelId}
+          />
         </div>
+        {filtersOpen && (
+          <div id={filterPanelId}>
+            <FilterPanel rows={matched} value={filters} onChange={setFilters} perks={session.perks} />
+          </div>
+        )}
 
         <div className="pf-filters" role="group" aria-label="Filter by ownership">
           {(
@@ -299,6 +330,7 @@ export function CodexPage(props: {
                   onClick={() => {
                     setQuery("");
                     setOwned("all");
+                    setFilters(NO_FILTERS);
                     setPrefs((p) => ({ ...p, rarity: "all" }));
                   }}
                 >
