@@ -14,6 +14,10 @@ use crate::inventory::{BUCKET_ENERGY, BUCKET_KINETIC, BUCKET_POWER, EnhancedPerk
 const RARITY_EXOTIC: u8 = 6;
 /// A character holds nine unequipped weapons per slot.
 const SLOT_CAPACITY: usize = 9;
+/// The vault's General bucket, where weapons and armor wait.
+const BUCKET_VAULT: u32 = 138_197_802;
+/// How many items the vault's General bucket holds (700 since The Final Shape).
+const VAULT_CAPACITY: usize = 700;
 
 /// One move between a character and the vault.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +159,24 @@ pub fn plan_equip(
     let on_target = matches!(place, Place::Inventory(c) | Place::Equipped(c) if c == target);
     if !on_target {
         plan.moves = true;
+        // Every move between characters goes through the vault, so check its room before anything
+        // moves: a full vault would otherwise stop the plan halfway.
+        let target_full =
+            items_of(inventories, target).iter().filter(|i| i.bucket_hash == bucket).count() >= SLOT_CAPACITY;
+        let needed = usize::from(target_full) + usize::from(!matches!(place, Place::Vault));
+        let used = profile
+            .profile_inventory
+            .data
+            .iter()
+            .flat_map(|l| l.items.iter())
+            .filter(|i| i.bucket_hash == BUCKET_VAULT)
+            .count();
+        if used + needed > VAULT_CAPACITY {
+            return Err(format!(
+                "Your vault is full. Make room for {needed} {} in the vault first.",
+                if needed == 1 { "item" } else { "items" }
+            ));
+        }
         // Room in the target's slot first.
         let held: Vec<&RawItem> = items_of(inventories, target).iter().filter(|i| i.bucket_hash == bucket).collect();
         if held.len() >= SLOT_CAPACITY {
@@ -273,8 +295,6 @@ mod tests {
     use super::*;
     use paraforge_core::{ColumnRole, WeaponLook};
 
-    const VAULT: u32 = 138_197_802;
-
     fn weapons() -> HashMap<WeaponHash, WeaponDef> {
         let def = |hash: u32, slot: u8, rarity: u8, sockets: Vec<u8>| WeaponDef {
             hash: WeaponHash(hash),
@@ -345,7 +365,7 @@ mod tests {
 
     #[test]
     fn from_the_vault_moves_switches_perks_and_equips() {
-        let p = profile(vec![item(1, "x", VAULT)], vec![("t", vec![], vec![item(2, "e", BUCKET_ENERGY)])]);
+        let p = profile(vec![item(1, "x", BUCKET_VAULT)], vec![("t", vec![], vec![item(2, "e", BUCKET_ENERGY)])]);
         let mut r = req("x", "t");
         // Column 1 wants 101 (selectable), column 2 wants 201 (not selectable now).
         r.perks = vec![vec![PerkHash(101)], vec![PerkHash(201)]];
@@ -400,10 +420,25 @@ mod tests {
     #[test]
     fn a_full_slot_sends_one_weapon_to_the_vault_first() {
         let full: Vec<_> = (0..9).map(|i| item(2, &format!("f{i}"), BUCKET_ENERGY)).collect();
-        let p = profile(vec![item(1, "x", VAULT)], vec![("t", full, vec![])]);
+        let p = profile(vec![item(1, "x", BUCKET_VAULT)], vec![("t", full, vec![])]);
         let plan = plan_equip(&p, &weapons(), &EnhancedPerks::bundled(), &req("x", "t")).unwrap();
         assert_eq!(plan.steps[0], transfer(2, "f8", "t", true));
         assert_eq!(plan.steps[1], transfer(1, "x", "t", false));
+    }
+
+    #[test]
+    fn a_full_vault_is_refused_before_anything_moves() {
+        let vault: Vec<_> = (0..VAULT_CAPACITY).map(|i| item(2, &format!("v{i}"), BUCKET_VAULT)).collect();
+        let p = profile(vault, vec![("a", vec![], vec![item(1, "x", BUCKET_ENERGY)]), ("t", vec![], vec![])]);
+        let mut weapons = weapons();
+        weapons.get_mut(&WeaponHash(2)).unwrap().look.slot = 2;
+        let e = plan_equip(&p, &weapons, &EnhancedPerks::bundled(), &req("x", "t")).unwrap_err();
+        assert!(e.contains("vault is full"), "{e}");
+        // From the vault itself, with room in the slot, no vault space is needed.
+        let mut vault: Vec<_> = (0..VAULT_CAPACITY - 1).map(|i| item(2, &format!("v{i}"), BUCKET_VAULT)).collect();
+        vault.push(item(1, "y", BUCKET_VAULT));
+        let p = profile(vault, vec![("t", vec![], vec![])]);
+        assert!(plan_equip(&p, &weapons, &EnhancedPerks::bundled(), &req("y", "t")).is_ok());
     }
 
     #[test]

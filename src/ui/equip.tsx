@@ -12,12 +12,16 @@ import { BungieImage } from "./weapon";
 const SCOPE_HINT = "Move or equip Destiny gear";
 
 function outcomeText(o: EquipOutcome, switching: boolean): string {
+  const parts: string[] = [];
   if (o.steps === 0) {
-    return switching
-      ? `Already equipped on your ${o.character} with this roll's perks.`
-      : `Already equipped on your ${o.character}.`;
+    parts.push(
+      switching && o.perks_missing === 0
+        ? `Already equipped on your ${o.character} with this roll's perks.`
+        : `Already equipped on your ${o.character}.`,
+    );
+  } else {
+    parts.push(o.equipped ? `Equipped on your ${o.character}.` : `Moved to your ${o.character}.`);
   }
-  const parts = [o.equipped ? `Equipped on your ${o.character}.` : `Moved to your ${o.character}.`];
   if (o.perks_switched > 0) parts.push(`Switched ${o.perks_switched} ${o.perks_switched === 1 ? "perk" : "perks"}.`);
   if (o.perks_missing > 0) {
     parts.push(
@@ -60,6 +64,8 @@ export function EquipButton(props: {
 
   async function run(character: Character) {
     setOpen(false);
+    // Focus stays on the button (it was in the menu), so the keyboard does not drop to the page.
+    button.current?.focus();
     setBusy(true);
     try {
       const outcome = await invoke<EquipOutcome>("equip_copy", {
@@ -73,6 +79,8 @@ export function EquipButton(props: {
       if (outcome.steps > 0) void session.syncQuietly();
     } catch (e) {
       const text = String(e);
+      // Some steps ran before the failure; show where the weapon is now.
+      if (text.includes("got part of the way")) void session.syncQuietly();
       toast({
         tone: "error",
         text,
@@ -135,7 +143,11 @@ function CharacterMenu(props: {
 }) {
   const menu = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const { anchor, onClose } = props;
+  const { anchor } = props;
+  // The latest onClose, so the listeners below are added once and focus is not reset on re-render.
+  const closeRef = useRef(props.onClose);
+  closeRef.current = props.onClose;
+  const onClose = (back: boolean) => closeRef.current(back);
 
   // Under the button, kept inside the window.
   useLayoutEffect(() => {
@@ -150,10 +162,13 @@ function CharacterMenu(props: {
 
   useEffect(() => {
     menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, []);
+
+  useEffect(() => {
     const away = (e: MouseEvent) => {
-      if (!menu.current?.contains(e.target as Node) && !anchor?.contains(e.target as Node)) onClose(false);
+      if (!menu.current?.contains(e.target as Node) && !anchor?.contains(e.target as Node)) closeRef.current(false);
     };
-    const gone = () => onClose(false);
+    const gone = () => closeRef.current(false);
     document.addEventListener("mousedown", away, true);
     window.addEventListener("resize", gone);
     window.addEventListener("blur", gone);
@@ -162,7 +177,7 @@ function CharacterMenu(props: {
       window.removeEventListener("resize", gone);
       window.removeEventListener("blur", gone);
     };
-  }, [anchor, onClose]);
+  }, [anchor]);
 
   function onKey(e: KeyboardEvent<HTMLDivElement>) {
     const items = [...(menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];

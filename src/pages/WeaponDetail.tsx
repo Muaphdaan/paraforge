@@ -74,7 +74,7 @@ export function WeaponDetail(props: {
             Open weapon page
             <ArrowRight size={16} aria-hidden="true" />
           </button>
-          {row.location !== "equipped" && <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />}
+          <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />
         </div>
 
         {row.score ? (

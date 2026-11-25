@@ -122,6 +122,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   const running = useRef(false);
+  // A quiet sync asked for while another ran (after equipping a weapon): it runs once that ends.
+  const rerun = useRef(false);
+  const runSyncRef = useRef<(auto: boolean) => Promise<void>>(async () => {});
   const [loaded, setLoaded] = useState<{ context: ScoreContext; rows: VaultRow[] } | null>(null);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [perks, setPerks] = useState<Record<number, Perk>>({});
@@ -198,8 +201,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(refreshAuth, [refreshAuth]);
 
-  const runSync = useCallback(async (auto: boolean) => {
-    if (running.current) return;
+  const runSync = useCallback(async (auto: boolean, queue = false) => {
+    if (running.current) {
+      if (queue) rerun.current = true;
+      return;
+    }
     running.current = true;
     lastAttempt.current = Date.now();
     // A manual sync starts clean; an automatic one leaves any error up until it succeeds.
@@ -230,11 +236,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } finally {
       running.current = false;
       setSyncStep(null);
+      if (rerun.current) {
+        rerun.current = false;
+        void runSyncRef.current(true);
+      }
     }
   }, []);
+  runSyncRef.current = runSync;
   // Buttons pass their click event; this wrapper keeps it from being read as `auto`.
   const sync = useCallback(() => runSync(false), [runSync]);
-  const syncQuietly = useCallback(() => runSync(true), [runSync]);
+  const syncQuietly = useCallback(() => runSync(true, true), [runSync]);
 
   const setSyncPrefs = useCallback((prefs: SyncPrefs) => {
     setSyncPrefsState(prefs);

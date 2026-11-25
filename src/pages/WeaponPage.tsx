@@ -171,7 +171,7 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
         )}
       </div>
       <div className="pf-weapon__actions">
-        {row.location !== "equipped" && <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />}
+        <EquipButton instanceId={row.instance_id} ariaLabel={`Equip ${row.name}`} />
         <button type="button" className="pf-btn" onClick={copySummary}>
           {copyState === "copied" ? <Check size={16} aria-hidden="true" /> : <ClipboardCopy size={16} aria-hidden="true" />}
           <span role="status">

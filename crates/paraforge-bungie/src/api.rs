@@ -107,7 +107,10 @@ fn action_error(status: &str) -> Option<ApiError> {
 /// Parses a platform reply. `status` is the HTTP status.
 pub fn parse_envelope<T: DeserializeOwned>(status: u16, body: &[u8]) -> Result<T, ApiError> {
     if status == 401 {
-        return Err(ApiError::SignInRequired);
+        // Bungie may send its reason with a 401; a missing app permission is not fixed by signing in.
+        let scope = serde_json::from_slice::<Envelope<IgnoredAny>>(body)
+            .is_ok_and(|env| env.error_status == "AccessNotPermittedByApplicationScope");
+        return Err(if scope { ApiError::MissingMoveScope } else { ApiError::SignInRequired });
     }
     match serde_json::from_slice::<Envelope<T>>(body) {
         Ok(env) => {
@@ -388,8 +391,9 @@ mod tests {
         let other =
             br#"{"ErrorCode":1665,"ThrottleSeconds":0,"ErrorStatus":"DestinyPrivacyRestriction","Message":"private"}"#;
         assert!(matches!(parse_envelope::<Manifest>(200, other), Err(ApiError::Bungie { code: 1665, .. })));
-        let scope = br#"{"ErrorCode":12,"ThrottleSeconds":0,"ErrorStatus":"AccessNotPermittedByApplicationScope","Message":"x"}"#;
+        let scope = br#"{"ErrorCode":2108,"ThrottleSeconds":0,"ErrorStatus":"AccessNotPermittedByApplicationScope","Message":"x"}"#;
         assert!(matches!(parse_envelope::<Manifest>(200, scope), Err(ApiError::MissingMoveScope)));
+        assert!(matches!(parse_envelope::<Manifest>(401, scope), Err(ApiError::MissingMoveScope)));
         let away = br#"{"ErrorCode":1634,"ThrottleSeconds":0,"ErrorStatus":"DestinyCannotPerformActionAtThisLocation","Message":"x"}"#;
         let msg = parse_envelope::<Manifest>(200, away).unwrap_err().to_string();
         assert!(msg.contains("orbit"), "{msg}");

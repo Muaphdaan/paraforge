@@ -68,10 +68,20 @@ pub async fn equip_copy(
         return Err("ParaForge is already moving a weapon. Wait for it to finish.".into());
     }
     let _guard = RunningGuard(&sync.acting);
+    if sync.running.load(Ordering::SeqCst) {
+        return Err("A sync is running. Try again when it finishes.".into());
+    }
 
     let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
     let api = BungieApi::new(&keys).map_err(api_err).map_err(sentence)?;
     let (profile, tokens, account) = read_player(&app, &api).await.map_err(sentence)?;
+    let missing = profile.missing_parts();
+    if !missing.is_empty() {
+        return Err(format!(
+            "Bungie did not send your full inventory (missing: {}), so ParaForge can't tell where the weapon is.",
+            missing.join(", ")
+        ));
+    }
     let defs = {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|e| e.to_string())?;
