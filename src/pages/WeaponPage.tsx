@@ -2,7 +2,7 @@
 // every perk the weapon can roll with this copy's perks lit, stats, god rolls and your copies.
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, ClipboardCopy, Lock, Sparkles } from "lucide-react";
+import { Check, ClipboardCopy, Lock, MapPin, Sparkles } from "lucide-react";
 import {
   CONTEXTS,
   CopyScore,
@@ -149,6 +149,12 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
             </span>
           )}
         </div>
+        {row.look.source && (
+          <p className="pf-codex__source" data-tip="Where to farm another copy">
+            <MapPin size={16} aria-hidden="true" />
+            {row.look.source}
+          </p>
+        )}
       </div>
       <div className="pf-weapon__score">
         {row.score ? (

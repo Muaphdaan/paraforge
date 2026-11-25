@@ -1,6 +1,6 @@
 // The detail panel for one owned copy, in the spirit of light.gg: screenshot banner, the facts,
 // the score with its reasons, every perk column with icons, and your other copies of the weapon.
-import { ArrowRight, Check, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Lock, MapPin, Sparkles } from "lucide-react";
 import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "../app/api";
 import { GodRolls } from "../ui/godrolls";
 import { TierPill, VerdictPill } from "../ui/parts";
@@ -60,6 +60,13 @@ export function WeaponDetail(props: {
             </span>
           )}
         </div>
+
+        {row.look.source && (
+          <p className="pf-codex__source">
+            <MapPin size={16} aria-hidden="true" />
+            {row.look.source}
+          </p>
+        )}
 
         <button type="button" className="pf-btn pf-btn--primary pf-detail__open" onClick={props.onOpen}>
           Open weapon page
