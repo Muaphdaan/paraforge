@@ -34,6 +34,9 @@ function readPrefs(): { view: View; group: GroupBy; sort: SortBy } {
   }
 }
 
+// Search and verdict filter survive leaving the Vault (for a weapon page, say) until the app closes.
+const kept: { query: string; verdict: Verdict | "all" } = { query: "", verdict: "all" };
+
 type Section = { key: string; title: string; groups: { key: string; title: string | null; rows: VaultRow[] }[] };
 
 function compare(sort: SortBy) {
@@ -106,8 +109,12 @@ export function VaultPage({
   const session = useSession();
   const [prefs, setPrefs] = useState(readPrefs);
   const searchId = useId();
-  const [query, setQuery] = useState("");
-  const [verdict, setVerdict] = useState<Verdict | "all">("all");
+  const [query, setQuery] = useState(kept.query);
+  const [verdict, setVerdict] = useState<Verdict | "all">(kept.verdict);
+  useEffect(() => {
+    kept.query = query;
+    kept.verdict = verdict;
+  }, [query, verdict]);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
 
   useEffect(() => {

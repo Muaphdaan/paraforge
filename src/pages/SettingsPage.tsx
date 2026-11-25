@@ -82,7 +82,14 @@ function AccountCard() {
   const signIn = useSignIn();
   const [message, setMessage] = useState<string | null>(null);
   const signedIn = Boolean(auth?.signed_in);
-  const name = session.info?.player ?? (auth?.membership_id ? `Bungie.net member ${auth.membership_id}` : "Guardian");
+  // The stored name is from the last sync; another account signed in since then shows its id instead.
+  const ownName =
+    session.info?.player && session.info.player_membership_id === auth?.membership_id ? session.info.player : null;
+  const name = ownName ?? (auth?.membership_id ? `Bungie.net member ${auth.membership_id}` : "Guardian");
+  const startSignIn = () => {
+    setMessage(null);
+    void signIn.start();
+  };
 
   return (
     <Card id="settings-account" title="Bungie account">
@@ -111,14 +118,17 @@ function AccountCard() {
             </div>
           </div>
           <div className="pf-row">
-            <button type="button" className="pf-btn" onClick={signIn.start} disabled={signIn.busy}>
+            <button type="button" className="pf-btn" onClick={startSignIn} disabled={signIn.busy}>
               <LogIn size={16} aria-hidden="true" />
               {signIn.waiting ? "Waiting for Bungie..." : "Sign in again"}
             </button>
             <button
               type="button"
               className="pf-btn pf-btn--danger"
-              onClick={async () => setMessage(await signOut(session.setAuth))}
+              onClick={async () => {
+                setMessage(null);
+                setMessage(await signOut(session.setAuth));
+              }}
             >
               <LogOut size={16} aria-hidden="true" />
               Sign out
@@ -133,7 +143,7 @@ function AccountCard() {
               : "Sign in with Bungie in your browser. ParaForge never sees your password."}
           </p>
           <div className="pf-row">
-            <button type="button" className="pf-btn pf-btn--primary" onClick={signIn.start} disabled={signIn.busy}>
+            <button type="button" className="pf-btn pf-btn--primary" onClick={startSignIn} disabled={signIn.busy}>
               <LogIn size={16} aria-hidden="true" />
               {signIn.waiting ? "Start sign-in again" : "Sign in with Bungie"}
             </button>

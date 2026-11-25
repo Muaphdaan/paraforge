@@ -9,7 +9,9 @@ mod window_style;
 
 use std::sync::Mutex;
 
-use paraforge_core::{Context, CopyScore, Database, ScoringRules, WeaponDef, WeaponHash};
+use paraforge_core::{
+    ChaseRoll, CodexRow, Context, CopyScore, Database, PerkHash, ScoringRules, WeaponDef, WeaponHash,
+};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -27,6 +29,8 @@ struct AppInfo {
     synced_at: Option<i64>,
     /// The player's Bungie Name from the last sync, for example "NightOwl#4821".
     player: Option<String>,
+    /// The Bungie membership that `player` belongs to.
+    player_membership_id: Option<String>,
     /// Version of Bungie's item database last read.
     manifest_version: Option<String>,
     weapons_known: usize,
@@ -46,6 +50,7 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         ruleset: ScoringRules::default().ruleset,
         synced_at: db.meta("synced_at").map_err(|e| e.to_string())?.and_then(|v| v.parse().ok()),
         player: db.meta("player_name").map_err(|e| e.to_string())?,
+        player_membership_id: db.meta("player_membership_id").map_err(|e| e.to_string())?,
         manifest_version: db.meta("manifest_version").map_err(|e| e.to_string())?,
         weapons_known: db.count("weapon").map_err(|e| e.to_string())?,
         perks_known: db.count("perk").map_err(|e| e.to_string())?,
@@ -59,6 +64,44 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
 fn weapon(state: State<'_, AppState>, hash: u32) -> Result<Option<WeaponDef>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.weapon(WeaponHash(hash)).map_err(|e| e.to_string())
+}
+
+/// Every Legendary and Exotic weapon in the game, for the Codex.
+#[tauri::command]
+fn codex(state: State<'_, AppState>) -> Result<Vec<CodexRow>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.codex().map_err(|e| e.to_string())
+}
+
+/// The rolls the player is hunting.
+#[tauri::command]
+fn chase_list(state: State<'_, AppState>) -> Result<Vec<ChaseRoll>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.chases().map_err(|e| e.to_string())
+}
+
+/// Adds a roll to the Chase list: the wanted perks per column, an empty column for any perk.
+#[tauri::command]
+fn chase_add(state: State<'_, AppState>, weapon: u32, perks: Vec<Vec<u32>>) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let def =
+        db.weapon(WeaponHash(weapon)).map_err(|e| e.to_string())?.ok_or("That weapon is not in the item database.")?;
+    if perks.len() > def.columns.len() || perks.iter().all(Vec::is_empty) {
+        return Err("Pick at least one perk this weapon can roll.".into());
+    }
+    let perks: Vec<Vec<PerkHash>> = perks.into_iter().map(|c| c.into_iter().map(PerkHash).collect()).collect();
+    let added = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string();
+    db.add_chase(def.hash, &perks, &added).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chase_remove(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.remove_chase(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -114,6 +157,10 @@ pub fn run() {
             app_info,
             vault_scores,
             weapon,
+            codex,
+            chase_list,
+            chase_add,
+            chase_remove,
             game::game_running,
             auth::auth_status,
             auth::save_app_keys,

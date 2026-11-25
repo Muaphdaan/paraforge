@@ -17,7 +17,7 @@ import {
   reasonText,
 } from "../app/api";
 import { useSession } from "../app/session";
-import { EmptyState, TierPill, VerdictPill } from "../ui/parts";
+import { EmptyState, TierPill, useCopy, VerdictPill } from "../ui/parts";
 import { AmmoBadge, BungieImage, ElementBadge, PerkIcon } from "../ui/weapon";
 
 type ScoreMap = Record<string, CopyScore>;
@@ -49,15 +49,17 @@ export function WeaponPage(props: { instanceId: string; onSelect: (instanceId: s
   const session = useSession();
   const rows = session.vault;
   const row = rows?.find((r) => r.instance_id === props.instanceId) ?? null;
-  const [def, setDef] = useState<WeaponDef | null>(null);
+  // undefined while it loads; null when there is none or it could not be read.
+  const [def, setDef] = useState<WeaponDef | null | undefined>(undefined);
   const scores = useScoresByContext(session.dataVersion);
   const weaponHash = row?.weapon;
 
   useEffect(() => {
     if (weaponHash === undefined) return;
     let live = true;
+    setDef(undefined);
     invoke<WeaponDef | null>("weapon", { hash: weaponHash }).then(
-      (d) => live && setDef(d),
+      (d) => live && setDef(d ?? null),
       () => live && setDef(null),
     );
     return () => {
@@ -96,7 +98,7 @@ export function WeaponPage(props: { instanceId: string; onSelect: (instanceId: s
 
 function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
   const session = useSession();
-  const [copied, setCopied] = useState(false);
+  const [copyState, copy] = useCopy();
   const exotic = row.look.rarity === 6;
   function copySummary() {
     const perks = row.columns
@@ -108,13 +110,7 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
       row.score ? `${ctx}: ${row.score.score.toFixed(0)}, ${row.score.verdict.toUpperCase()}` : "Not scored",
       perks ? `Perks: ${perks}` : "",
     ].filter(Boolean);
-    navigator.clipboard.writeText(lines.join("\n")).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 2000);
-      },
-      () => {},
-    );
+    copy(lines.join("\n"));
   }
   return (
     <section className="pf-panel pf-weapon__hero" data-rarity={row.look.rarity} aria-label="Overview">
@@ -166,8 +162,10 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
       </div>
       <div className="pf-weapon__actions">
         <button type="button" className="pf-btn" onClick={copySummary}>
-          {copied ? <Check size={16} aria-hidden="true" /> : <ClipboardCopy size={16} aria-hidden="true" />}
-          {copied ? "Copied" : "Copy summary"}
+          {copyState === "copied" ? <Check size={16} aria-hidden="true" /> : <ClipboardCopy size={16} aria-hidden="true" />}
+          <span role="status">
+            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy summary"}
+          </span>
         </button>
       </div>
     </section>
@@ -183,7 +181,10 @@ function VerdictCard(props: { row: VaultRow; scores: Record<ScoreContext, ScoreM
       </h2>
       <ul className="pf-modes">
         {CONTEXTS.map((c) => {
-          const s = props.scores?.[c.value]?.[props.row.instance_id];
+          // While both modes load (or if that fails), the current mode still has the vault's score.
+          const s =
+            props.scores?.[c.value]?.[props.row.instance_id] ??
+            (c.value === props.context ? (props.row.score ?? undefined) : undefined);
           return (
             <li key={c.value} data-current={c.value === props.context || undefined}>
               <span className="pf-modes__name">{c.label}</span>
@@ -210,7 +211,7 @@ function VerdictCard(props: { row: VaultRow; scores: Record<ScoreContext, ScoreM
   );
 }
 
-function PerksCard(props: { row: VaultRow; def: WeaponDef | null; perks: ReturnType<typeof useSession>["perks"] }) {
+function PerksCard(props: { row: VaultRow; def: WeaponDef | null | undefined; perks: ReturnType<typeof useSession>["perks"] }) {
   const { row, def, perks } = props;
   return (
     <section className="pf-panel pf-weapon__perks" aria-labelledby="w-perks">
@@ -240,7 +241,11 @@ function PerksCard(props: { row: VaultRow; def: WeaponDef | null; perks: ReturnT
             })}
           </div>
           <p className="pf-muted pf-perkgrid__note">
-            {def ? "Lit perks are on your copy. The rest can roll on this weapon." : "Loading every perk this weapon can roll..."}
+            {def
+              ? "Lit perks are on your copy. The rest can roll on this weapon."
+              : def === undefined
+                ? "Loading every perk this weapon can roll..."
+                : "Only your copy's perks are shown; the full list comes after your next sync."}
           </p>
           <ul className="pf-rollnames">
             {row.columns.map((col, i) => (

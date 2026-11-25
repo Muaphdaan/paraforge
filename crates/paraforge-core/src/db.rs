@@ -151,6 +151,15 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE weapon_copy ADD COLUMN stats TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE weapon_copy ADD COLUMN location TEXT NOT NULL DEFAULT 'vault';
     "#,
+    // 5: the Chase list, rolls the player is hunting
+    r#"
+    CREATE TABLE chase (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        weapon_hash INTEGER NOT NULL,
+        perks       TEXT NOT NULL,          -- JSON: wanted perks per column, [] for any
+        added       TEXT NOT NULL
+    );
+    "#,
 ];
 
 const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools";
@@ -288,6 +297,78 @@ impl Database {
             .query_row(&format!("SELECT {WEAPON_COLUMNS} FROM weapon WHERE hash = ?1"), [hash.0], weapon_from_row)
             .optional()?;
         row.map(parse_weapon).transpose()
+    }
+
+    /// Every Legendary and Exotic weapon in the game with what can roll on it and how many copies
+    /// the player owns, by name.
+    pub fn codex(&self) -> Result<Vec<CodexRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {WEAPON_COLUMNS}, (SELECT COUNT(*) FROM weapon_copy c WHERE c.weapon_hash = weapon.hash) FROM weapon"
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((weapon_from_row(r)?, r.get::<_, i64>(7)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (raw, owned) = row?;
+            let def = parse_weapon(raw)?;
+            if def.look.rarity < RARITY_LEGENDARY {
+                continue;
+            }
+            out.push(CodexRow {
+                hash: def.hash,
+                name: def.name,
+                type_name: def.type_name,
+                look: def.look,
+                roles: def.columns,
+                pools: def.pools,
+                owned: owned as u32,
+            });
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name).then(a.hash.cmp(&b.hash)));
+        Ok(out)
+    }
+
+    /// Adds a roll to the Chase list and returns its id. Chasing the same roll twice keeps one entry.
+    pub fn add_chase(&self, weapon: WeaponHash, perks: &[Vec<PerkHash>], added: &str) -> Result<i64> {
+        let mut perks: Vec<Vec<PerkHash>> = perks.to_vec();
+        for column in &mut perks {
+            column.sort();
+            column.dedup();
+        }
+        let json = serde_json::to_string(&perks)?;
+        let existing: Option<i64> = self
+            .conn
+            .query_row("SELECT id FROM chase WHERE weapon_hash = ?1 AND perks = ?2", params![weapon.0, json], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+        self.conn.execute(
+            "INSERT INTO chase(weapon_hash, perks, added) VALUES (?1, ?2, ?3)",
+            params![weapon.0, json, added],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// The Chase list, oldest first.
+    pub fn chases(&self) -> Result<Vec<ChaseRoll>> {
+        let mut stmt = self.conn.prepare("SELECT id, weapon_hash, perks, added FROM chase ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, u32>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, weapon, perks, added) = row?;
+            out.push(ChaseRoll { id, weapon: WeaponHash(weapon), perks: serde_json::from_str(&perks)?, added });
+        }
+        Ok(out)
+    }
+
+    /// Removes a roll from the Chase list; removing one that is not there does nothing.
+    pub fn remove_chase(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM chase WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     /// Full-text search over weapon names and types; prefix matching on each word.
@@ -607,6 +688,35 @@ impl Database {
         }
         Ok(out)
     }
+}
+
+/// Bungie TierType of Legendary weapons; Exotic is 6. Lower tiers are not in the Codex.
+const RARITY_LEGENDARY: u8 = 5;
+
+/// A roll on the Chase list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ChaseRoll {
+    pub id: i64,
+    pub weapon: WeaponHash,
+    /// The perks wanted in each column, in column order; an empty column takes any perk.
+    pub perks: Vec<Vec<PerkHash>>,
+    /// When it was added, Unix seconds.
+    pub added: String,
+}
+
+/// One weapon in the Codex.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CodexRow {
+    pub hash: WeaponHash,
+    pub name: String,
+    pub type_name: String,
+    pub look: WeaponLook,
+    /// What each perk column is, same order as `pools`.
+    pub roles: Vec<ColumnRole>,
+    /// Every perk that can currently roll in each column.
+    pub pools: Vec<Vec<PerkHash>>,
+    /// Copies the player owns.
+    pub owned: u32,
 }
 
 /// One line of the vault list.

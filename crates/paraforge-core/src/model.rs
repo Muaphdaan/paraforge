@@ -127,6 +127,10 @@ pub struct WeaponLook {
     pub ammo: u8,
     /// Bungie TierType: 5 Legendary (Superior), 6 Exotic.
     pub rarity: u8,
+    /// Where it drops, from its Collections entry, for example "Last Wish raid". Empty when unknown.
+    pub source: String,
+    /// The hash of its Collections entry, 0 when it has none.
+    pub collectible: u32,
 }
 
 /// One column on an owned copy.

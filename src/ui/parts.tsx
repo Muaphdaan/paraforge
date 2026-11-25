@@ -1,5 +1,5 @@
 // Small shared pieces of the design system.
-import { KeyboardEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
+import { KeyboardEvent, ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ArrowLeftRight,
   ArrowUp,
@@ -233,15 +233,35 @@ export function Toggle(props: {
   );
 }
 
+/**
+ * Copies text to the clipboard and reports how it went for 2 seconds: "copied" or "failed"
+ * (the clipboard can be blocked), then "idle" again. Each press restarts the 2 seconds.
+ */
+export function useCopy(): [state: "idle" | "copied" | "failed", copy: (text: string) => void] {
+  const [result, setResult] = useState<{ state: "idle" | "copied" | "failed"; at: number }>({ state: "idle", at: 0 });
+  useEffect(() => {
+    if (result.state === "idle") return;
+    const t = window.setTimeout(() => setResult({ state: "idle", at: 0 }), 2000);
+    return () => window.clearTimeout(t);
+  }, [result]);
+  const copy = useCallback((text: string) => {
+    const done = (state: "copied" | "failed") => setResult({ state, at: performance.now() });
+    try {
+      navigator.clipboard.writeText(text).then(
+        () => done("copied"),
+        () => done("failed"),
+      );
+    } catch {
+      done("failed");
+    }
+  }, []);
+  return [result.state, copy];
+}
+
 /** A read-only value with a Copy button, for things like the redirect URL. */
 export function CopyField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+  const [state, copy] = useCopy();
   const id = useId();
-  useEffect(() => {
-    if (!copied) return;
-    const t = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(t);
-  }, [copied]);
   return (
     <div className="pf-field">
       <label className="pf-field__label" htmlFor={id}>
@@ -249,18 +269,9 @@ export function CopyField({ label, value }: { label: string; value: string }) {
       </label>
       <div className="pf-copyfield">
         <input id={id} className="pf-input" value={value} readOnly onFocus={(e) => e.currentTarget.select()} />
-        <button
-          type="button"
-          className="pf-btn pf-btn--small"
-          onClick={() =>
-            navigator.clipboard.writeText(value).then(
-              () => setCopied(true),
-              () => setCopied(false),
-            )
-          }
-        >
-          {copied ? <Check size={14} aria-hidden="true" /> : null}
-          {copied ? "Copied" : "Copy"}
+        <button type="button" className="pf-btn pf-btn--small" onClick={() => copy(value)}>
+          {state === "copied" ? <Check size={14} aria-hidden="true" /> : null}
+          <span role="status">{state === "copied" ? "Copied" : state === "failed" ? "Copy failed, select and copy" : "Copy"}</span>
         </button>
       </div>
     </div>

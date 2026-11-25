@@ -9,7 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use paraforge_bungie::api::{ApiError, BungieApi, DestinyMembership};
 use paraforge_bungie::inventory::RawProfile;
-use paraforge_bungie::inventory::{EnhancedPerks, RawItemDef, RawPlugSetDef, build_catalog, read_profile};
+use paraforge_bungie::inventory::{
+    EnhancedPerks, RawCollectibleDef, RawItemDef, RawPlugSetDef, build_catalog, read_profile,
+};
 use paraforge_core::{Context, PerkInfo, ScoreError, ScoringRules, VaultRow, score_vault};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -19,10 +21,11 @@ use crate::auth::{self, AuthState};
 
 const ITEMS_TABLE: &str = "DestinyInventoryItemDefinition";
 const PLUG_SETS_TABLE: &str = "DestinyPlugSetDefinition";
+const COLLECTIBLES_TABLE: &str = "DestinyCollectibleDefinition";
 const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
-const CATALOG_VERSION: &str = "catalog-3";
+const CATALOG_VERSION: &str = "catalog-4";
 
 #[derive(Default)]
 pub struct SyncState {
@@ -86,7 +89,10 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let _guard = RunningGuard(&sync.running);
 
     progress(&app, "Checking your Bungie sign-in");
-    let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
+    let (keys, signed_in) = auth::access_token(&app.state::<AuthState>()).await?;
+    // Settings shows the stored Bungie Name only while the same account is signed in.
+    let membership_id = signed_in.membership_id.clone();
+    drop(signed_in);
     let api = BungieApi::new(&keys).map_err(api_err)?;
 
     // 1. Item definitions, downloaded again only when Bungie publishes a new manifest.
@@ -94,7 +100,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let manifest = api.manifest().await.map_err(api_err)?;
     let items_path = manifest.table_path(ITEMS_TABLE).ok_or("Bungie's manifest has no item table.")?.to_string();
     let sets_path = manifest.table_path(PLUG_SETS_TABLE).ok_or("Bungie's manifest has no plug set table.")?.to_string();
-    let wanted = format!("{CATALOG_VERSION}\n{items_path}\n{sets_path}");
+    let collectibles_path =
+        manifest.table_path(COLLECTIBLES_TABLE).ok_or("Bungie's manifest has no Collections table.")?.to_string();
+    let wanted = format!("{CATALOG_VERSION}\n{items_path}\n{sets_path}\n{collectibles_path}");
     let (current, have_weapons) = {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -106,13 +114,21 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         let dir = manifest_dir(&app)?;
         let items_file = dir.join("items.json");
         let sets_file = dir.join("plugsets.json");
-        let downloaded = match api.download_table(&items_path, &items_file).await {
-            Ok(()) => api.download_table(&sets_path, &sets_file).await,
-            Err(e) => Err(e),
-        };
+        let collectibles_file = dir.join("collectibles.json");
+        let raw_files = [items_file.clone(), sets_file.clone(), collectibles_file.clone()];
+        let mut downloaded = Ok(());
+        for (path, file) in
+            [(&items_path, &items_file), (&sets_path, &sets_file), (&collectibles_path, &collectibles_file)]
+        {
+            downloaded = api.download_table(path, file).await;
+            if downloaded.is_err() {
+                break;
+            }
+        }
         if let Err(e) = downloaded {
-            let _ = std::fs::remove_file(&items_file);
-            let _ = std::fs::remove_file(&sets_file);
+            for file in &raw_files {
+                let _ = std::fs::remove_file(file);
+            }
             return Err(api_err(e));
         }
 
@@ -122,7 +138,8 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let items: HashMap<String, RawItemDef> = read_table(&items_file)?;
             let sets: HashMap<String, RawPlugSetDef> = read_table(&sets_file)?;
-            let catalog = build_catalog(&items, &sets, &enhanced2);
+            let collectibles: HashMap<String, RawCollectibleDef> = read_table(&collectibles_file)?;
+            let catalog = build_catalog(&items, &sets, &collectibles, &enhanced2);
             drop(items);
             // Check before writing, so a changed format never wipes the weapons already stored.
             if catalog.weapons.is_empty() {
@@ -139,8 +156,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         .map_err(|e| e.to_string())
         .and_then(|r| r);
         // The raw tables are large and no longer needed, whether or not reading them worked.
-        let _ = std::fs::remove_file(dir.join("items.json"));
-        let _ = std::fs::remove_file(dir.join("plugsets.json"));
+        for file in &raw_files {
+            let _ = std::fs::remove_file(file);
+        }
         result?;
     }
 
@@ -180,6 +198,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     db.set_meta(META_SYNCED_AT, &synced_at.to_string()).map_err(|e| e.to_string())?;
     if let Some(name) = profile.player_name() {
         db.set_meta("player_name", &name).map_err(|e| e.to_string())?;
+        db.set_meta("player_membership_id", &membership_id).map_err(|e| e.to_string())?;
     }
     let manifest_version = db.meta("manifest_version").map_err(|e| e.to_string())?.unwrap_or_default();
 

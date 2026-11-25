@@ -4,7 +4,10 @@ import backdrop from "./assets/backdrop.webp";
 import { PAGE_ORDER, PageId } from "./app/pages";
 import { SessionProvider, useSession } from "./app/session";
 import { HomePage } from "./pages/HomePage";
-import { ChasePage, CodexPage, CollectionsPage } from "./pages/Placeholders";
+import { ChaseProvider } from "./app/chase";
+import { ChasePage } from "./pages/ChasePage";
+import { CodexPage } from "./pages/CodexPage";
+import { CollectionsPage } from "./pages/CollectionsPage";
 import { SETTINGS_SECTIONS, SettingsPage, SettingsSection } from "./pages/SettingsPage";
 import { FirstRun } from "./pages/FirstRun";
 import { WeaponPage } from "./pages/WeaponPage";
@@ -59,10 +62,21 @@ function Shell() {
     },
     [navigate],
   );
-  const openWeaponPage = useCallback((instanceId: string) => push({ page: "weapon", weapon: instanceId }), [push]);
+  // The copy on a weapon page is also the one the Vault selects when Back leads there.
+  const openWeaponPage = useCallback(
+    (instanceId: string) => {
+      setVaultFocus(instanceId);
+      push({ page: "weapon", weapon: instanceId });
+    },
+    [push],
+  );
+  const openInCodex = useCallback((hash: number) => push({ page: "codex", weapon: String(hash) }), [push]);
   // Switching copies on a weapon page replaces it, so Back still leads out of the weapon.
   const switchCopy = useCallback(
-    (instanceId: string) => setHistory((h) => [...h.slice(0, -1), { page: "weapon", weapon: instanceId }]),
+    (instanceId: string) => {
+      setVaultFocus(instanceId);
+      setHistory((h) => [...h.slice(0, -1), { page: "weapon", weapon: instanceId }]);
+    },
     [],
   );
   const back = useCallback(() => setHistory((h) => (h.length > 1 ? h.slice(0, -1) : h)), []);
@@ -141,15 +155,24 @@ function Shell() {
               {page === "weapon" && route.weapon && (
                 <WeaponPage key={route.weapon} instanceId={route.weapon} onSelect={switchCopy} />
               )}
-              {page === "codex" && <CodexPage />}
-              {page === "chase" && <ChasePage onNavigate={navigate} />}
-              {page === "collections" && <CollectionsPage />}
+              {page === "codex" && (
+                <CodexPage initialHash={route.weapon ? Number(route.weapon) : null} onOpenWeapon={openWeaponPage} />
+              )}
+              {page === "chase" && (
+                <ChasePage onNavigate={navigate} onOpenInCodex={openInCodex} onOpenWeapon={openWeaponPage} />
+              )}
+              {page === "collections" && <CollectionsPage onOpenInCodex={openInCodex} />}
               {page === "settings" && <SettingsPage section={settingsSection} onSection={setSettingsSection} />}
             </div>
           </div>
         </main>
       </div>
-      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} onOpenWeapon={openWeaponPage} />
+      <SearchPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenWeapon={openWeaponPage}
+        onOpenInCodex={openInCodex}
+      />
     </>
   );
 }
@@ -163,8 +186,8 @@ function Root() {
     if (firstRun === null && session.info && session.auth) setFirstRun(session.info.synced_at === null);
   }, [firstRun, session.info, session.auth]);
   if (firstRun === null) {
-    // app_info failed: show the app (with its error banner) rather than nothing.
-    if (session.auth && !session.info && session.syncError) return <Shell />;
+    // app_info or the sign-in read failed: show the app (with its error banner) rather than nothing.
+    if ((!session.auth && session.authError) || (session.auth && !session.info && session.infoLoaded)) return <Shell />;
     return null;
   }
   return firstRun ? (
@@ -232,7 +255,9 @@ function Banners({ page, onNavigate }: { page: PageId; onNavigate: (page: PageId
 export default function App() {
   return (
     <SessionProvider>
-      <Root />
+      <ChaseProvider>
+        <Root />
+      </ChaseProvider>
     </SessionProvider>
   );
 }

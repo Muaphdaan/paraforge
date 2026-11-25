@@ -1,5 +1,5 @@
 // First run, as in the approved U06 mockup: connect a private Bungie app, sign in, first sync.
-import { useEffect, useState } from "react";
+import { MutableRefObject, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, CircleCheck, ExternalLink, LoaderCircle } from "lucide-react";
 import logo from "../assets/brand/logo.png";
@@ -31,6 +31,8 @@ export function FirstRun({ onFinish }: { onFinish: () => void }) {
   const session = useSession();
   const auth = session.auth;
   const [editKeys, setEditKeys] = useState(false);
+  // The browser opens on its own once only: not again after Back, nor on React's development re-run.
+  const autoSignIn = useRef(false);
   const step = !auth?.has_app_keys || editKeys ? 1 : !auth.signed_in ? 2 : 3;
 
   return (
@@ -45,7 +47,7 @@ export function FirstRun({ onFinish }: { onFinish: () => void }) {
       <main className="pf-panel pf-firstrun__card">
         <Stepper step={step} />
         {step === 1 && <ConnectStep onDone={() => setEditKeys(false)} canGoBack={false} />}
-        {step === 2 && <SignInStep onBack={() => setEditKeys(true)} />}
+        {step === 2 && <SignInStep autoStarted={autoSignIn} onBack={() => setEditKeys(true)} />}
         {step === 3 && <SyncStep onFinish={onFinish} />}
       </main>
     </div>
@@ -83,16 +85,16 @@ function ConnectStep(props: { onDone: () => void; canGoBack: boolean }) {
   );
 }
 
-function SignInStep({ onBack }: { onBack: () => void }) {
+function SignInStep({ onBack, autoStarted }: { onBack: () => void; autoStarted: MutableRefObject<boolean> }) {
   const signIn = useSignIn();
   // Open the browser straight away the first time this step shows.
-  const [started, setStarted] = useState(false);
+  const start = signIn.start;
   useEffect(() => {
-    if (!started) {
-      setStarted(true);
-      void signIn.start();
+    if (!autoStarted.current) {
+      autoStarted.current = true;
+      void start();
     }
-  }, [started, signIn]);
+  }, [autoStarted, start]);
 
   return (
     <section className="pf-stack pf-firstrun__center" aria-labelledby="fr-signin">
@@ -144,14 +146,15 @@ function SyncStep({ onFinish }: { onFinish: () => void }) {
   const done = session.syncedAt !== null;
   const running = session.syncStep !== null;
 
-  // Start the first sync as soon as this step shows.
-  const [started, setStarted] = useState(false);
+  // Start the first sync as soon as this step shows, unless one is already running (it then counts
+  // as this step's sync); a failure waits for Try again.
+  const started = useRef(false);
+  const sync = session.sync;
   useEffect(() => {
-    if (!started && !done && !running) {
-      setStarted(true);
-      void session.sync();
-    }
-  }, [started, done, running, session]);
+    if (started.current || done) return;
+    started.current = true;
+    if (!running) void sync();
+  }, [done, running, sync]);
 
   const phase = done ? 3 : phaseOf(session.syncStep);
   const rows: { label: string; detail: string }[] = [

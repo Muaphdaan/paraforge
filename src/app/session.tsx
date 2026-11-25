@@ -37,6 +37,8 @@ type Session = {
   setSyncPrefs: (prefs: SyncPrefs) => void;
   /** Destiny 2 is running and "sync while I play" is on, so syncs come every 2 minutes. */
   playing: boolean;
+  /** The first app_info read has finished, whether or not it worked. */
+  infoLoaded: boolean;
 };
 
 export type SyncPrefs = {
@@ -237,7 +239,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // - otherwise on the chosen schedule.
   const canSync = Boolean(auth?.signed_in) && infoLoaded;
   useEffect(() => {
-    if (!canSync) return;
+    if (!canSync) {
+      setPlaying(false);
+      return;
+    }
     let cancelled = false;
     const check = async () => {
       const isPlaying = syncPrefs.whilePlaying ? await invoke<boolean>("game_running").catch(() => false) : false;
@@ -294,6 +299,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     syncPrefs,
     setSyncPrefs,
     playing,
+    infoLoaded,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

@@ -227,7 +227,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 4);
+    assert_eq!(db.schema_version().unwrap(), 5);
 
     let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     defs[0].look = WeaponLook {
@@ -258,6 +258,26 @@ fn database_round_trip() {
     let one = &defs[0];
     assert_eq!(db.weapon(one.hash).unwrap().as_ref(), Some(one));
     assert_eq!(db.weapon(WeaponHash(999_999)).unwrap(), None);
+
+    // The Codex lists Legendary and Exotic weapons only (here just the first), with owned copies counted.
+    let codex = db.codex().unwrap();
+    assert_eq!(codex.len(), 1, "weapons below Legendary are left out");
+    assert_eq!(codex[0].hash, one.hash);
+    assert_eq!(codex[0].pools, one.pools);
+    assert_eq!(codex[0].owned as usize, v.iter().filter(|c| c.weapon == one.hash).count());
+
+    // The Chase list keeps one entry per roll, whatever order the perks were picked in.
+    let wanted = vec![vec![PerkHash(2), PerkHash(1)], vec![], vec![PerkHash(4)]];
+    let id = db.add_chase(one.hash, &wanted, "1764000000").unwrap();
+    let again = vec![vec![PerkHash(1), PerkHash(2), PerkHash(2)], vec![], vec![PerkHash(4)]];
+    assert_eq!(db.add_chase(one.hash, &again, "1764000001").unwrap(), id);
+    let other = db.add_chase(WeaponHash(4), &[vec![PerkHash(9)]], "1764000002").unwrap();
+    let list = db.chases().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].perks, vec![vec![PerkHash(1), PerkHash(2)], vec![], vec![PerkHash(4)]]);
+    db.remove_chase(other).unwrap();
+    db.remove_chase(other).unwrap();
+    assert_eq!(db.chases().unwrap().iter().map(|c| c.id).collect::<Vec<_>>(), vec![id]);
 
     let mut loaded = db.copies().unwrap();
     v.sort_by(|a, b| a.instance_id.cmp(&b.instance_id));
@@ -335,7 +355,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 4);
+    assert_eq!(db.schema_version().unwrap(), 5);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

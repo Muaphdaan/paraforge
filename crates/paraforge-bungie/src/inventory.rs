@@ -143,6 +143,20 @@ pub struct RawItemDef {
     pub inventory: RawInventoryBlock,
     pub equipping_block: RawEquippingBlock,
     pub default_damage_type: u8,
+    pub collectible_hash: Option<u32>,
+}
+
+/// The fields of `DestinyCollectibleDefinition` that ParaForge reads.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawCollectibleDef {
+    pub source_string: String,
+}
+
+/// Bungie writes sources as "Source: Last Wish raid"; the prefix adds nothing on screen.
+fn clean_source(text: &str) -> String {
+    let text = text.trim();
+    text.strip_prefix("Source:").map(str::trim).unwrap_or(text).to_string()
 }
 
 /// Inventory buckets of the three weapon slots.
@@ -150,7 +164,9 @@ const BUCKET_KINETIC: u32 = 1_498_876_634;
 const BUCKET_ENERGY: u32 = 2_465_295_065;
 const BUCKET_POWER: u32 = 953_998_645;
 
-fn look(item: &RawItemDef) -> WeaponLook {
+fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>) -> WeaponLook {
+    let collectible = item.collectible_hash.unwrap_or(0);
+    let source = collectibles.get(&collectible.to_string()).map(|c| clean_source(&c.source_string)).unwrap_or_default();
     WeaponLook {
         icon: item.display_properties.icon.clone(),
         watermark: item.icon_watermark.clone(),
@@ -164,6 +180,8 @@ fn look(item: &RawItemDef) -> WeaponLook {
         damage: item.default_damage_type,
         ammo: item.equipping_block.ammo_type,
         rarity: item.inventory.tier_type,
+        source,
+        collectible,
     }
 }
 
@@ -255,11 +273,12 @@ fn column_role(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Option<Col
     }
 }
 
-/// Builds the weapon catalog from the `DestinyInventoryItemDefinition` and `DestinyPlugSetDefinition`
-/// tables (each a JSON object keyed by hash).
+/// Builds the weapon catalog from the `DestinyInventoryItemDefinition`, `DestinyPlugSetDefinition` and
+/// `DestinyCollectibleDefinition` tables (each a JSON object keyed by hash).
 pub fn build_catalog(
     items: &HashMap<String, RawItemDef>,
     plug_sets: &HashMap<String, RawPlugSetDef>,
+    collectibles: &HashMap<String, RawCollectibleDef>,
     enhanced: &EnhancedPerks,
 ) -> Catalog {
     let mut catalog = Catalog::default();
@@ -296,7 +315,7 @@ pub fn build_catalog(
             type_name: item.item_type_display_name.clone(),
             columns,
             socket_indexes,
-            look: look(item),
+            look: look(item, collectibles),
             pools,
         });
     }
@@ -597,7 +616,7 @@ mod tests {
             "itemTypeDisplayName": "Hand Cannon", "itemType": 3, "itemCategoryHashes": [1, 6],
             "iconWatermark": "/icons/season.png", "screenshot": "/screens/hc.jpg",
             "inventory": {"tierType": 5, "bucketTypeHash": 2465295065u32},
-            "equippingBlock": {"ammoType": 1}, "defaultDamageType": 3,
+            "equippingBlock": {"ammoType": 1}, "defaultDamageType": 3, "collectibleHash": 900,
             "sockets": {
                 "socketEntries": [
                     {"socketTypeHash": 1, "singleInitialItemHash": 10},
@@ -663,10 +682,22 @@ mod tests {
         (items, sets)
     }
 
+    fn collectibles() -> HashMap<String, RawCollectibleDef> {
+        [("900".to_string(), RawCollectibleDef { source_string: "Source: Last Wish raid".into() })]
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn sources_lose_their_prefix() {
+        assert_eq!(clean_source("Source: Last Wish raid"), "Last Wish raid");
+        assert_eq!(clean_source("  Exotic quest  "), "Exotic quest");
+    }
+
     #[test]
     fn catalog_finds_random_roll_columns() {
         let (items, sets) = manifest();
-        let c = build_catalog(&items, &sets, &enhanced());
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
         assert_eq!(c.weapons.len(), 2, "dummies are skipped");
         let w = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
         assert_eq!(w.name, "Test Hand Cannon");
@@ -688,7 +719,7 @@ mod tests {
     #[test]
     fn catalog_reads_how_weapons_look() {
         let (items, sets) = manifest();
-        let c = build_catalog(&items, &sets, &enhanced());
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
         let hc = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
         assert_eq!(
             hc.look,
@@ -700,10 +731,13 @@ mod tests {
                 damage: 3,
                 ammo: 1,
                 rarity: 5,
+                source: "Last Wish raid".into(),
+                collectible: 900,
             }
         );
         let exotic = c.weapons.iter().find(|w| w.hash == WeaponHash(3000)).expect("exotics are kept");
         assert!(exotic.columns.is_empty());
+        assert_eq!((exotic.look.source.as_str(), exotic.look.collectible), ("", 0), "no Collections entry");
         assert_eq!((exotic.look.slot, exotic.look.damage, exotic.look.ammo, exotic.look.rarity), (3, 2, 3, 6));
     }
 

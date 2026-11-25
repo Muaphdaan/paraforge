@@ -7,6 +7,8 @@ export type AppInfo = {
   synced_at: number | null;
   /** The player's Bungie Name from the last sync, for example "NightOwl#4821". */
   player: string | null;
+  /** The Bungie membership that `player` belongs to. */
+  player_membership_id: string | null;
   manifest_version: string | null;
   weapons_known: number;
   perks_known: number;
@@ -64,6 +66,10 @@ export type WeaponLook = {
   ammo: number;
   /** 5 Legendary, 6 Exotic. */
   rarity: number;
+  /** Where it drops, for example "Last Wish raid". Empty when unknown or before the next sync. */
+  source: string;
+  /** Its Collections entry, 0 when it has none. */
+  collectible: number;
 };
 
 export type ColumnRole = "barrel" | "magazine" | "trait";
@@ -104,6 +110,28 @@ export type WeaponDef = {
   look: WeaponLook;
   /** Every perk that can currently roll in each column, same order as `columns`. */
   pools: number[][];
+};
+
+/** One weapon in the Codex, from the `codex` command. */
+export type CodexRow = {
+  hash: number;
+  name: string;
+  type_name: string;
+  look: WeaponLook;
+  roles: ColumnRole[];
+  pools: number[][];
+  /** Copies you own. */
+  owned: number;
+};
+
+/** A roll on the Chase list, from the `chase_list` command. */
+export type ChaseRoll = {
+  id: number;
+  weapon: number;
+  /** Wanted perks per column, in column order; an empty column takes any perk. */
+  perks: number[][];
+  /** When it was added, Unix seconds as text. */
+  added: string;
 };
 
 /**
