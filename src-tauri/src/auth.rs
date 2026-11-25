@@ -141,13 +141,20 @@ pub fn auth_status() -> Result<AuthStatus, String> {
 
 /// Saves the player's Bungie app keys. This is the only time a key passes through the interface.
 #[tauri::command]
-pub fn save_app_keys(api_key: String, client_id: String, client_secret: String) -> Result<AuthStatus, String> {
+pub async fn save_app_keys(
+    state: State<'_, AuthState>,
+    api_key: String,
+    client_id: String,
+    client_secret: String,
+) -> Result<AuthStatus, String> {
     let keys = AppCredentials {
         api_key: Secret::new(api_key.trim()),
         client_id: normalize_client_id(&client_id),
         client_secret: Secret::new(client_secret.trim()),
     };
     keys.validate()?;
+    // Wait for any token refresh in flight, so it cannot write old tokens back afterwards.
+    let _guard = state.refresh_lock.lock().await;
     save(APP_KEYS, &keys)?;
     // New keys invalidate tokens issued to the old app.
     delete_tokens()?;
@@ -163,8 +170,17 @@ pub fn start_sign_in(app: AppHandle, state: State<'_, AuthState>) -> Result<(), 
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Opens Bungie's application portal, where the player creates their private ParaForge app.
+/// The address is fixed here, so the interface cannot open arbitrary links.
 #[tauri::command]
-pub fn sign_out() -> Result<AuthStatus, String> {
+pub fn open_bungie_apps(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url("https://www.bungie.net/en/Application", None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn sign_out(state: State<'_, AuthState>) -> Result<AuthStatus, String> {
+    // Wait for any token refresh in flight, so it cannot sign the user back in afterwards.
+    let _guard = state.refresh_lock.lock().await;
     delete_tokens()?;
     status()
 }

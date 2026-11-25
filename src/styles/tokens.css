@@ -1,0 +1,58 @@
+/* Design tokens from the approved design spec ("A v2 Cyan & Pink").
+   Change a value here only with Jinx's OK and a decision-log entry. */
+:root {
+  /* Colours */
+  --bg-top: #0b0d1f;
+  --bg-bottom: #05060f;
+  --panel: rgb(21 26 54 / 0.85);
+  --panel-raised: rgb(28 34 69 / 0.9);
+  --panel-solid: #151a36;
+  --border: #2e3566;
+  --control-outline: #5a64a8;
+  --highlight: rgb(255 255 255 / 0.06);
+  --text: #eef1ff;
+  --text-muted: #9198c2;
+  --accent: #22e5ff;
+  --on-accent: #05060f;
+  --accent-2: #ff3db8;
+  --keep: #3df5a8;
+  --upgrade: #6c8cff;
+  --replace: #ffb020;
+  --shard: #ff4d5e;
+  --live: #34d399;
+
+  /* Type */
+  --font: "Nunito Variable", "Nunito", "Segoe UI", system-ui, sans-serif;
+  --text-caption: 12px;
+  --text-label: 13px;
+  --text-body: 14px;
+  --text-name: 16px;
+  --text-panel-title: 20px;
+  --text-page-title: 28px;
+  --text-hero: 44px;
+
+  /* Shape and spacing (4 px grid) */
+  --radius-panel: 16px;
+  --radius-card: 12px;
+  --radius-small: 8px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Effects */
+  --glow-accent: 0 0 8px rgb(34 229 255 / 0.45);
+  --glow-accent-soft: 0 0 6px rgb(34 229 255 / 0.25);
+  --glow-pink: 0 0 8px rgb(255 61 184 / 0.5);
+  --blur: 12px;
+  --ease: 150ms ease-out;
+
+  /* Layout */
+  --gap: 12px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed: 72px;
+  --control-height: 40px;
+}

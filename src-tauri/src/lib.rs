@@ -1,12 +1,19 @@
 //! The ParaForge desktop shell. The interface talks to the core only through the
 //! allow-listed commands registered below; it never sees sign-in tokens or calls Bungie.
 
+mod actions;
 mod auth;
+mod game;
 mod sync;
+mod updates;
+#[cfg(windows)]
+mod window_style;
 
 use std::sync::Mutex;
 
-use paraforge_core::{Context, CopyScore, Database, ScoringRules};
+use paraforge_core::{
+    ChaseRoll, CodexRow, Context, CopyScore, Database, PerkHash, ScoringRules, WeaponDef, WeaponHash,
+};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -16,21 +23,122 @@ pub(crate) struct AppState {
 
 #[derive(Serialize)]
 struct AppInfo {
-    version: &'static str,
+    version: String,
     core_version: &'static str,
     schema_version: i64,
     ruleset: String,
+    /// Unix seconds of the last successful vault sync, if there has been one.
+    synced_at: Option<i64>,
+    /// The player's Bungie Name from the last sync, for example "NightOwl#4821".
+    player: Option<String>,
+    /// The Bungie membership that `player` belongs to.
+    player_membership_id: Option<String>,
+    /// Version of Bungie's item database last read.
+    manifest_version: Option<String>,
+    weapons_known: usize,
+    perks_known: usize,
+    copies: usize,
+    /// Curated god rolls stored, from the community voltron list.
+    god_rolls: usize,
+    /// Why the last god-roll update failed, if it did.
+    god_roll_error: Option<String>,
+    /// The scoring rules, so Settings can explain the verdict thresholds.
+    rules: ScoringRules,
+    /// The player's characters from the last sync, most recently played first.
+    characters: Vec<paraforge_bungie::inventory::Character>,
 }
 
 #[tauri::command]
-fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
+fn app_info(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<AppInfo, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     Ok(AppInfo {
-        version: env!("CARGO_PKG_VERSION"),
+        // The build's version (CI stamps each build), which the updater compares.
+        version: app.package_info().version.to_string(),
         core_version: paraforge_core::VERSION,
         schema_version: db.schema_version().map_err(|e| e.to_string())?,
         ruleset: ScoringRules::default().ruleset,
+        synced_at: db.meta("synced_at").map_err(|e| e.to_string())?.and_then(|v| v.parse().ok()),
+        player: db.meta("player_name").map_err(|e| e.to_string())?,
+        player_membership_id: db.meta("player_membership_id").map_err(|e| e.to_string())?,
+        manifest_version: db.meta("manifest_version").map_err(|e| e.to_string())?,
+        weapons_known: db.count("weapon").map_err(|e| e.to_string())?,
+        perks_known: db.count("perk").map_err(|e| e.to_string())?,
+        copies: db.count("weapon_copy").map_err(|e| e.to_string())?,
+        god_rolls: db.count("curated_roll").map_err(|e| e.to_string())?,
+        god_roll_error: db.meta("rolls_error").map_err(|e| e.to_string())?.filter(|e| !e.is_empty()),
+        rules: ScoringRules::default(),
+        characters: db
+            .meta(sync::META_CHARACTERS)
+            .map_err(|e| e.to_string())?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
     })
+}
+
+/// One weapon's definition, including every perk each column can roll.
+#[tauri::command]
+fn weapon(state: State<'_, AppState>, hash: u32) -> Result<Option<WeaponDef>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.weapon(WeaponHash(hash)).map_err(|e| e.to_string())
+}
+
+/// Every Legendary and Exotic weapon in the game, for the Codex.
+#[tauri::command]
+fn codex(state: State<'_, AppState>) -> Result<Vec<CodexRow>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.codex().map_err(|e| e.to_string())
+}
+
+/// Every curated god roll for one weapon, PvE and PvP, in list order.
+#[tauri::command]
+fn god_rolls(state: State<'_, AppState>, weapon: u32) -> Result<Vec<paraforge_core::CuratedRoll>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.rolls_for(paraforge_core::WeaponHash(weapon)).map_err(|e| e.to_string())
+}
+
+/// Records a keep / shard decision on a copy ("keep", "shard" or "seen"), or clears it with null.
+/// These are ParaForge notes: nothing changes in the game.
+#[tauri::command]
+fn mark_copy(state: State<'_, AppState>, instance_id: String, mark: Option<String>) -> Result<(), String> {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        // Milliseconds, so quick decisions keep their order.
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+        .to_string();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.set_mark(&instance_id, mark.as_deref(), &at).map_err(|e| e.to_string())
+}
+
+/// The rolls the player is hunting.
+#[tauri::command]
+fn chase_list(state: State<'_, AppState>) -> Result<Vec<ChaseRoll>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.chases().map_err(|e| e.to_string())
+}
+
+/// Adds a roll to the Chase list: the wanted perks per column, an empty column for any perk.
+#[tauri::command]
+fn chase_add(state: State<'_, AppState>, weapon: u32, perks: Vec<Vec<u32>>) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let def =
+        db.weapon(WeaponHash(weapon)).map_err(|e| e.to_string())?.ok_or("That weapon is not in the item database.")?;
+    if perks.len() > def.columns.len() || perks.iter().all(Vec::is_empty) {
+        return Err("Pick at least one perk this weapon can roll.".into());
+    }
+    let perks: Vec<Vec<PerkHash>> = perks.into_iter().map(|c| c.into_iter().map(PerkHash).collect()).collect();
+    let added = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string();
+    db.add_chase(def.hash, &perks, &added).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn chase_remove(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.remove_chase(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -76,18 +184,35 @@ pub fn run() {
             let db = Database::open(dir.join("paraforge.sqlite"))?;
             app.manage(AppState { db: Mutex::new(db) });
             app.manage(sync::SyncState::default());
+            app.manage(updates::UpdateState::default());
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                window_style::paint_title_bar(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
             vault_scores,
+            weapon,
+            codex,
+            god_rolls,
+            mark_copy,
+            chase_list,
+            chase_add,
+            chase_remove,
+            game::game_running,
             auth::auth_status,
             auth::save_app_keys,
             auth::start_sign_in,
+            auth::open_bungie_apps,
             auth::sign_out,
             sync::sync_now,
             sync::vault,
-            sync::perk_names,
+            sync::perks,
+            actions::equip_copy,
+            updates::update_check,
+            updates::update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

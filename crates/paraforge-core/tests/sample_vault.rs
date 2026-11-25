@@ -41,6 +41,9 @@ fn def(hash: u32, name: &str, type_name: &str) -> WeaponDef {
         type_name: type_name.into(),
         columns: vec![Barrel, Magazine, Trait, Trait],
         socket_indexes: vec![1, 2, 3, 4],
+        look: Default::default(),
+        pools: Vec::new(),
+        parts: Vec::new(),
     }
 }
 
@@ -55,11 +58,17 @@ fn roll(hash: u32) -> CuratedRoll {
             vec![PerkHash(TRAIT_TOP_B)],
         ],
         curator: "test".into(),
+        title: String::new(),
+        notes: String::new(),
+        tags: Vec::new(),
+        masterwork: String::new(),
+        mods: String::new(),
+        source: String::new(),
     }
 }
 
 fn col(perk: u32, enhanced: bool) -> CopyColumn {
-    CopyColumn { options: vec![PerkHash(perk)], enhanced }
+    CopyColumn { options: vec![PerkHash(perk)], enhanced, plugged: Some(PerkHash(perk)) }
 }
 
 fn copy(id: &str, weapon: u32, tier: u8, perks: [u32; 4], enhanced: [bool; 4], masterworked: bool) -> WeaponCopy {
@@ -70,6 +79,9 @@ fn copy(id: &str, weapon: u32, tier: u8, perks: [u32; 4], enhanced: [bool; 4], m
         columns: perks.iter().zip(enhanced).map(|(p, e)| col(*p, e)).collect(),
         masterworked,
         locked: false,
+        stats: Default::default(),
+        location: Default::default(),
+        parts: Vec::new(),
     }
 }
 
@@ -223,11 +235,21 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 8);
 
-    let defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    defs[0].look = WeaponLook {
+        icon: "/common/destiny2_content/icons/a.jpg".into(),
+        slot: 2,
+        damage: 3,
+        ammo: 1,
+        rarity: 5,
+        ..Default::default()
+    };
+    defs[0].pools = vec![vec![PerkHash(1), PerkHash(2)], vec![PerkHash(3)], vec![], vec![PerkHash(4)]];
     db.upsert_weapons(&defs).unwrap();
-    assert_eq!(db.weapons().unwrap(), f.defs);
+    let expected: HashMap<WeaponHash, WeaponDef> = defs.iter().map(|d| (d.hash, d.clone())).collect();
+    assert_eq!(db.weapons().unwrap(), expected);
     assert_eq!(db.search_weapons("static", 10).unwrap(), vec![WeaponHash(1)]);
     assert_eq!(db.search_weapons("sniper", 10).unwrap(), vec![WeaponHash(4)]);
     assert!(db.search_weapons("  ", 10).unwrap().is_empty());
@@ -238,7 +260,32 @@ fn database_round_trip() {
     db.replace_ratings(&ratings(), "test").unwrap();
     db.replace_rolls(&f.rolls, "test").unwrap();
     let mut v = vault();
-    db.replace_copies(&v, "2026-11-24T21:00:00Z").unwrap();
+    v[0].stats = [(4_043_523_819, 70), (3_871_231_066, 12)].into_iter().collect();
+    v[0].location = CopyLocation::Equipped;
+    db.replace_copies(&v, "2026-11-24T21:00:00Z", false).unwrap();
+    let one = &defs[0];
+    assert_eq!(db.weapon(one.hash).unwrap().as_ref(), Some(one));
+    assert_eq!(db.weapon(WeaponHash(999_999)).unwrap(), None);
+
+    // The Codex lists Legendary and Exotic weapons only (here just the first), with owned copies counted.
+    let codex = db.codex().unwrap();
+    assert_eq!(codex.len(), 1, "weapons below Legendary are left out");
+    assert_eq!(codex[0].hash, one.hash);
+    assert_eq!(codex[0].pools, one.pools);
+    assert_eq!(codex[0].owned as usize, v.iter().filter(|c| c.weapon == one.hash).count());
+
+    // The Chase list keeps one entry per roll, whatever order the perks were picked in.
+    let wanted = vec![vec![PerkHash(2), PerkHash(1)], vec![], vec![PerkHash(4)]];
+    let id = db.add_chase(one.hash, &wanted, "1764000000").unwrap();
+    let again = vec![vec![PerkHash(1), PerkHash(2), PerkHash(2)], vec![], vec![PerkHash(4)]];
+    assert_eq!(db.add_chase(one.hash, &again, "1764000001").unwrap(), id);
+    let other = db.add_chase(WeaponHash(4), &[vec![PerkHash(9)]], "1764000002").unwrap();
+    let list = db.chases().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].perks, vec![vec![PerkHash(1), PerkHash(2)], vec![], vec![PerkHash(4)]]);
+    db.remove_chase(other).unwrap();
+    db.remove_chase(other).unwrap();
+    assert_eq!(db.chases().unwrap().iter().map(|c| c.id).collect::<Vec<_>>(), vec![id]);
 
     let mut loaded = db.copies().unwrap();
     v.sort_by(|a, b| a.instance_id.cmp(&b.instance_id));
@@ -263,7 +310,7 @@ fn database_round_trip() {
     // A changed copy loses its stale score; an unchanged one keeps it.
     let mut changed = v.clone();
     changed.iter_mut().find(|c| c.instance_id == "go-1").unwrap().masterworked = true;
-    db.replace_copies(&changed, "2026-11-24T21:01:00Z").unwrap();
+    db.replace_copies(&changed, "2026-11-24T21:01:00Z", false).unwrap();
     let ids: Vec<String> = db.scores(Context::Pve).unwrap().into_iter().map(|s| s.instance_id).collect();
     assert!(!ids.contains(&"go-1".to_string()));
     assert!(ids.contains(&"nl-1".to_string()));
@@ -275,7 +322,7 @@ fn database_round_trip() {
 
     // A new sync without sv-3 drops the copy and its score.
     v.retain(|c| c.instance_id != "sv-3");
-    db.replace_copies(&v, "2026-11-24T21:02:00Z").unwrap();
+    db.replace_copies(&v, "2026-11-24T21:02:00Z", false).unwrap();
     assert_eq!(db.copies().unwrap().len(), 7);
     assert!(db.scores(Context::Pve).unwrap().iter().all(|s| s.instance_id != "sv-3"));
 
@@ -284,16 +331,22 @@ fn database_round_trip() {
     assert_eq!(rows[0].name, "Night Ledger");
     assert_eq!(rows[0].score.as_ref().unwrap().verdict, Verdict::Keep);
 
-    let perks =
-        [PerkInfo { hash: PerkHash(BARREL_GOOD), name: "Arrowhead Brake".into(), plug_category: "barrels".into() }];
+    let perks = [PerkInfo {
+        hash: PerkHash(BARREL_GOOD),
+        name: "Arrowhead Brake".into(),
+        plug_category: "barrels".into(),
+        icon: "/common/destiny2_content/icons/brake.png".into(),
+        description: "Lightly vented barrel.".into(),
+    }];
     db.replace_definitions(&defs, &perks).unwrap();
     assert_eq!(db.perk_names().unwrap()[&PerkHash(BARREL_GOOD)], "Arrowhead Brake");
-    assert_eq!(db.weapons().unwrap(), f.defs);
+    assert_eq!(db.perks().unwrap(), perks.to_vec());
+    assert_eq!(db.weapons().unwrap(), expected);
 
     // An untiered (legacy) copy is stored and scored at the bottom of the tier range.
     let mut legacy = v.clone();
     legacy[0].tier = Tier::new(0).unwrap();
-    db.replace_copies(&legacy, "2026-11-24T21:03:00Z").unwrap();
+    db.replace_copies(&legacy, "2026-11-24T21:03:00Z", false).unwrap();
     assert_eq!(db.copies().unwrap().iter().filter(|c| c.tier.get() == 0).count(), 1);
 
     db.set_meta("data_pack", "dev").unwrap();
@@ -310,7 +363,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 8);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();
@@ -344,4 +397,53 @@ fn empty_columns_lower_confidence() {
     }
     let out = score_vault(&f.defs, &[c], Context::Pve, &ratings(), &f.rolls, &ScoringRules::default());
     assert_eq!(out.scores[0].confidence, 0.0);
+}
+
+#[test]
+fn new_drops_and_marks() {
+    let f = fixture();
+    let mut db = Database::open_in_memory().unwrap();
+    let defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
+    db.upsert_weapons(&defs).unwrap();
+    let perks = [BARREL_GOOD, MAG_GOOD, TRAIT_TOP_A, TRAIT_TOP_B];
+    let a = copy("a", 1, 3, perks, [false; 4], false);
+    let b = copy("b", 1, 3, perks, [false; 4], false);
+    let c = copy("c", 2, 3, perks, [false; 4], false);
+
+    // The first sync is the baseline: nothing in it is a new drop.
+    db.replace_copies(&[a.clone(), b.clone()], "100", false).unwrap();
+    let seen = |db: &Database| -> HashMap<String, (i64, Option<String>)> {
+        db.vault_rows(Context::Pve).unwrap().into_iter().map(|r| (r.instance_id, (r.first_seen, r.mark))).collect()
+    };
+    assert!(seen(&db).values().all(|(t, _)| *t == 0));
+
+    // A later sync stamps only the copy it has not seen before; old copies keep their stamp.
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "200", false).unwrap();
+    db.set_mark("b", Some("shard"), "210").unwrap();
+    db.replace_copies(&[a.clone(), b.clone(), c.clone()], "300", false).unwrap();
+    let rows = seen(&db);
+    assert_eq!(rows["c"], (200, None));
+    assert_eq!(db.first_seen_at("300").unwrap(), 0);
+    assert_eq!(db.first_seen_at("200").unwrap(), 1);
+    assert_eq!(rows["a"].0, 0);
+    assert_eq!(rows["b"].1.as_deref(), Some("shard"));
+
+    // Clearing works, unknown marks are refused, and a dismantled copy loses its mark.
+    db.set_mark("b", None, "310").unwrap();
+    assert!(db.set_mark("a", Some("favourite"), "310").is_err());
+    db.set_mark("a", Some("keep"), "320").unwrap();
+    db.replace_copies(&[b, c], "400", false).unwrap();
+    db.replace_copies(&[a, copy("d", 2, 3, perks, [false; 4], false)], "500", false).unwrap();
+    let rows = seen(&db);
+    assert_eq!(rows["a"], (500, None), "a copy that left and came back is new again, without its old mark");
+
+    // Decisions carry when they were made.
+    db.set_mark("d", Some("keep"), "1700000000123").unwrap();
+    let d = db.vault_rows(Context::Pve).unwrap().into_iter().find(|r| r.instance_id == "d").unwrap();
+    assert_eq!(d.marked_at, 1_700_000_000_123);
+
+    // Another account's vault is a fresh baseline, not a flood of new drops.
+    let e = copy("e", 1, 3, perks, [false; 4], false);
+    db.replace_copies(&[e], "600", true).unwrap();
+    assert!(seen(&db).values().all(|(t, _)| *t == 0));
 }

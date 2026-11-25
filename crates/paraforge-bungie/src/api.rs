@@ -1,22 +1,25 @@
-//! Signed-in calls to the Bungie.net platform API: memberships, profile and manifest.
+//! Signed-in calls to the Bungie.net platform API: memberships, profile, manifest, and the item
+//! actions (move, equip, switch perks) that need the "Move or equip Destiny gear" scope.
 
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::actions::Transfer;
 use crate::inventory::RawProfile;
 use crate::{AppCredentials, Secret, USER_AGENT};
 
 pub const PLATFORM_URL: &str = "https://www.bungie.net/Platform";
 pub const CONTENT_URL: &str = "https://www.bungie.net";
 
-/// Components for a weapon sync: profile inventory (vault), character inventories, character
-/// equipment, item instances (tier), item sockets (equipped perks), reusable plugs (selectable perks).
-pub const PROFILE_COMPONENTS: &str = "102,201,205,300,305,310";
+/// Components for a weapon sync: profile, profile inventory (vault), characters, character
+/// inventories, character equipment, item instances (tier), stats, item sockets (equipped perks),
+/// reusable plugs (selectable perks).
+pub const PROFILE_COMPONENTS: &str = "100,102,200,201,205,300,304,305,310";
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -28,6 +31,13 @@ pub enum ApiError {
     SignInRequired,
     #[error("Bungie could not find a Destiny 2 account for this sign-in")]
     NoDestinyAccount,
+    #[error(
+        "your Bungie app does not have the \"Move or equip Destiny gear\" permission. Turn it on for \
+         your ParaForge app at bungie.net/en/Application, then press Sign in again in ParaForge's Settings"
+    )]
+    MissingMoveScope,
+    #[error("{0}")]
+    Action(&'static str),
     #[error("Bungie returned an error ({code} {status}): {message}")]
     Bungie { code: i32, status: String, message: String },
     #[error("Bungie.net is having difficulties (HTTP {0}). Try again later.")]
@@ -61,14 +71,46 @@ fn check_code(code: i32, throttle: i32, status: &str, message: &str) -> Result<(
         31 | 35 | 36 | 37 | 51 | 54 | 55 | 56 | 57 | 1672 => Err(ApiError::Throttled(throttle.max(1))),
         99 | 22 | 2111 | 2106 | 2122 | 2123 | 2124 | 2110 | 2118 => Err(ApiError::SignInRequired),
         1601 | 1670 => Err(ApiError::NoDestinyAccount),
-        _ => Err(ApiError::Bungie { code, status: status.to_string(), message: message.to_string() }),
+        _ => match action_error(status) {
+            Some(e) => Err(e),
+            None => Err(ApiError::Bungie { code, status: status.to_string(), message: message.to_string() }),
+        },
     }
+}
+
+/// Item-action refusals worth explaining in plain words, by Bungie's ErrorStatus name.
+fn action_error(status: &str) -> Option<ApiError> {
+    Some(match status {
+        "AccessNotPermittedByApplicationScope" => ApiError::MissingMoveScope,
+        "DestinyCannotPerformActionAtThisLocation"
+        | "DestinyCharacterNotInTower"
+        | "DestinyCharacterNotInSocialSpace" => ApiError::Action(
+            "Bungie only allows this while that character is in orbit, in a social space, or offline. \
+                 Go to orbit or the Tower and try again.",
+        ),
+        "DestinyNoRoomInDestination" => {
+            ApiError::Action("There is no room for it: your vault or that character's weapon slot is full.")
+        }
+        "DestinyItemUniqueEquipRestricted" => {
+            ApiError::Action("Only one exotic weapon can be equipped at a time. Unequip the other exotic first.")
+        }
+        "DestinyItemNotFound" => {
+            ApiError::Action("Bungie could not find that weapon where ParaForge expected it. Sync and try again.")
+        }
+        "DestinyItemActionForbidden" | "DestinySocketActionNotAllowed" | "DestinyItemFailedLevelCheck" => {
+            ApiError::Action("Bungie refused this change for that weapon.")
+        }
+        _ => return None,
+    })
 }
 
 /// Parses a platform reply. `status` is the HTTP status.
 pub fn parse_envelope<T: DeserializeOwned>(status: u16, body: &[u8]) -> Result<T, ApiError> {
     if status == 401 {
-        return Err(ApiError::SignInRequired);
+        // Bungie may send its reason with a 401; a missing app permission is not fixed by signing in.
+        let scope = serde_json::from_slice::<Envelope<IgnoredAny>>(body)
+            .is_ok_and(|env| env.error_status == "AccessNotPermittedByApplicationScope");
+        return Err(if scope { ApiError::MissingMoveScope } else { ApiError::SignInRequired });
     }
     match serde_json::from_slice::<Envelope<T>>(body) {
         Ok(env) => {
@@ -213,6 +255,75 @@ impl BungieApi {
         parse_envelope(status, &body)
     }
 
+    async fn post<B: Serialize>(&self, path: &str, token: &Secret, body: &B) -> Result<(), ApiError> {
+        let resp = self
+            .http
+            .post(format!("{}{path}", self.platform_url))
+            .header("X-API-Key", self.api_key.expose())
+            .bearer_auth(token.expose())
+            .json(body)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let body = resp.bytes().await?;
+        parse_envelope::<IgnoredAny>(status, &body).map(|_| ())
+    }
+
+    /// Moves one weapon between a character and the vault.
+    pub async fn transfer_item(
+        &self,
+        token: &Secret,
+        account: &DestinyMembership,
+        step: &Transfer,
+    ) -> Result<(), ApiError> {
+        let body = serde_json::json!({
+            "itemReferenceHash": step.item_hash,
+            "stackSize": 1,
+            "transferToVault": step.to_vault,
+            "itemId": step.item_id,
+            "characterId": step.character_id,
+            "membershipType": account.membership_type,
+        });
+        self.post("/Destiny2/Actions/Items/TransferItem/", token, &body).await
+    }
+
+    /// Equips a weapon that is already on the character.
+    pub async fn equip_item(
+        &self,
+        token: &Secret,
+        account: &DestinyMembership,
+        item_id: &str,
+        character_id: &str,
+    ) -> Result<(), ApiError> {
+        let body = serde_json::json!({
+            "itemId": item_id,
+            "characterId": character_id,
+            "membershipType": account.membership_type,
+        });
+        self.post("/Destiny2/Actions/Items/EquipItem/", token, &body).await
+    }
+
+    /// Selects one of a weapon's rolled perks, the way the game's own perk switch does (free and
+    /// reversible).
+    pub async fn insert_socket_plug_free(
+        &self,
+        token: &Secret,
+        account: &DestinyMembership,
+        item_id: &str,
+        character_id: &str,
+        socket_index: u8,
+        plug_hash: u32,
+    ) -> Result<(), ApiError> {
+        let body = serde_json::json!({
+            "plug": {"socketIndex": socket_index, "socketArrayType": 0, "plugItemHash": plug_hash},
+            "itemId": item_id,
+            "characterId": character_id,
+            "membershipType": account.membership_type,
+        });
+        self.post("/Destiny2/Actions/Items/InsertSocketPlugFree/", token, &body).await
+    }
+
     pub async fn memberships(&self, token: &Secret) -> Result<UserMemberships, ApiError> {
         self.get("/User/GetMembershipsForCurrentUser/", Some(token)).await
     }
@@ -280,6 +391,12 @@ mod tests {
         let other =
             br#"{"ErrorCode":1665,"ThrottleSeconds":0,"ErrorStatus":"DestinyPrivacyRestriction","Message":"private"}"#;
         assert!(matches!(parse_envelope::<Manifest>(200, other), Err(ApiError::Bungie { code: 1665, .. })));
+        let scope = br#"{"ErrorCode":2108,"ThrottleSeconds":0,"ErrorStatus":"AccessNotPermittedByApplicationScope","Message":"x"}"#;
+        assert!(matches!(parse_envelope::<Manifest>(200, scope), Err(ApiError::MissingMoveScope)));
+        assert!(matches!(parse_envelope::<Manifest>(401, scope), Err(ApiError::MissingMoveScope)));
+        let away = br#"{"ErrorCode":1634,"ThrottleSeconds":0,"ErrorStatus":"DestinyCannotPerformActionAtThisLocation","Message":"x"}"#;
+        let msg = parse_envelope::<Manifest>(200, away).unwrap_err().to_string();
+        assert!(msg.contains("orbit"), "{msg}");
     }
 
     #[test]

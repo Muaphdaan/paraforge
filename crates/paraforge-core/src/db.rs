@@ -9,8 +9,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
 use crate::model::{
-    ColumnRole, Context, CopyColumn, CuratedRoll, PerkHash, PerkInfo, Provenance, Tier, WeaponCopy, WeaponDef,
-    WeaponHash,
+    ColumnRole, Context, CopyColumn, CopyLocation, CopyPart, CuratedRoll, PerkHash, PerkInfo, Provenance, Tier,
+    WeaponCopy, WeaponDef, WeaponHash, WeaponLook, WeaponPart,
 };
 use crate::rules::PerkRatings;
 use crate::score::CopyScore;
@@ -139,7 +139,70 @@ const MIGRATIONS: &[&str] = &[
         plug_category TEXT NOT NULL DEFAULT ''
     );
     "#,
+    // 3: weapon icons, slot, element, ammo and rarity; perk icons and descriptions
+    r#"
+    ALTER TABLE weapon ADD COLUMN look TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE perk ADD COLUMN icon TEXT NOT NULL DEFAULT '';
+    ALTER TABLE perk ADD COLUMN description TEXT NOT NULL DEFAULT '';
+    "#,
+    // 4: each column's perk pool; each copy's stats and where it is
+    r#"
+    ALTER TABLE weapon ADD COLUMN pools TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE weapon_copy ADD COLUMN stats TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE weapon_copy ADD COLUMN location TEXT NOT NULL DEFAULT 'vault';
+    "#,
+    // 5: the Chase list, rolls the player is hunting
+    r#"
+    CREATE TABLE chase (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        weapon_hash INTEGER NOT NULL,
+        perks       TEXT NOT NULL,          -- JSON: wanted perks per column, [] for any
+        added       TEXT NOT NULL
+    );
+    "#,
+    // 6: intrinsic, origin trait, masterwork, mod and catalyst sockets, on weapons and copies
+    r#"
+    ALTER TABLE weapon ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE weapon_copy ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
+    "#,
+    // 7: god-roll titles, notes, tags and picks; the wish-list section each roll came from
+    r#"
+    ALTER TABLE curated_roll ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+    ALTER TABLE curated_roll ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+    "#,
+    // 8: when each copy first showed up (0 for the first sync's baseline), and the player's
+    // keep / shard decisions from the new drops review and duplicate triage
+    r#"
+    ALTER TABLE weapon_copy ADD COLUMN first_seen TEXT NOT NULL DEFAULT '0';
+    CREATE TABLE copy_mark (
+        instance_id TEXT PRIMARY KEY,
+        mark        TEXT NOT NULL CHECK (mark IN ('keep', 'shard', 'seen')),
+        marked_at   TEXT NOT NULL
+    );
+    "#,
 ];
+
+const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools, parts";
+
+type WeaponRow = (u32, String, String, String, String, String, String, String);
+
+fn weapon_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WeaponRow> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
+}
+
+fn parse_weapon(row: WeaponRow) -> Result<WeaponDef> {
+    let (hash, name, type_name, columns, sockets, look, pools, parts) = row;
+    Ok(WeaponDef {
+        hash: WeaponHash(hash),
+        name,
+        type_name,
+        columns: serde_json::from_str(&columns)?,
+        socket_indexes: serde_json::from_str(&sockets)?,
+        look: serde_json::from_str::<WeaponLook>(&look)?,
+        pools: serde_json::from_str(&pools)?,
+        parts: serde_json::from_str(&parts)?,
+    })
+}
 
 pub struct Database {
     conn: Connection,
@@ -208,9 +271,11 @@ impl Database {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes) VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools, parts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(hash) DO UPDATE SET name = excluded.name, type_name = excluded.type_name,
-                     columns = excluded.columns, socket_indexes = excluded.socket_indexes",
+                     columns = excluded.columns, socket_indexes = excluded.socket_indexes, look = excluded.look,
+                     pools = excluded.pools, parts = excluded.parts",
             )?;
             for w in weapons {
                 stmt.execute(params![
@@ -218,7 +283,10 @@ impl Database {
                     w.name,
                     w.type_name,
                     serde_json::to_string(&w.columns)?,
-                    serde_json::to_string(&w.socket_indexes)?
+                    serde_json::to_string(&w.socket_indexes)?,
+                    serde_json::to_string(&w.look)?,
+                    serde_json::to_string(&w.pools)?,
+                    serde_json::to_string(&w.parts)?
                 ])?;
             }
         }
@@ -227,27 +295,107 @@ impl Database {
     }
 
     pub fn weapons(&self) -> Result<HashMap<WeaponHash, WeaponDef>> {
-        let mut stmt = self.conn.prepare("SELECT hash, name, type_name, columns, socket_indexes FROM weapon")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, u32>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-            ))
-        })?;
+        let mut stmt = self.conn.prepare(&format!("SELECT {WEAPON_COLUMNS} FROM weapon"))?;
+        let rows = stmt.query_map([], weapon_from_row)?;
         let mut out = HashMap::new();
         for row in rows {
-            let (hash, name, type_name, columns, sockets) = row?;
-            let columns: Vec<ColumnRole> = serde_json::from_str(&columns)?;
-            let socket_indexes: Vec<u8> = serde_json::from_str(&sockets)?;
-            out.insert(
-                WeaponHash(hash),
-                WeaponDef { hash: WeaponHash(hash), name, type_name, columns, socket_indexes },
-            );
+            let def = parse_weapon(row?)?;
+            out.insert(def.hash, def);
         }
         Ok(out)
+    }
+
+    /// Number of rows in one of ParaForge's own tables.
+    pub fn count(&self, table: &str) -> Result<usize> {
+        if !["weapon", "perk", "weapon_copy", "curated_roll"].contains(&table) {
+            return Err(DbError::Corrupt(format!("no count for table {table:?}")));
+        }
+        let n: i64 = self.conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
+    /// One weapon's definition, with its perk pools.
+    pub fn weapon(&self, hash: WeaponHash) -> Result<Option<WeaponDef>> {
+        let row = self
+            .conn
+            .query_row(&format!("SELECT {WEAPON_COLUMNS} FROM weapon WHERE hash = ?1"), [hash.0], weapon_from_row)
+            .optional()?;
+        row.map(parse_weapon).transpose()
+    }
+
+    /// Every Legendary and Exotic weapon in the game with what can roll on it and how many copies
+    /// the player owns, by name.
+    pub fn codex(&self) -> Result<Vec<CodexRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {WEAPON_COLUMNS}, (SELECT COUNT(*) FROM weapon_copy c WHERE c.weapon_hash = weapon.hash) FROM weapon"
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((weapon_from_row(r)?, r.get::<_, i64>(8)?)))?;
+        let meta = self.meta_counts()?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (raw, owned) = row?;
+            let def = parse_weapon(raw)?;
+            if def.look.rarity < RARITY_LEGENDARY {
+                continue;
+            }
+            out.push(CodexRow {
+                hash: def.hash,
+                name: def.name,
+                type_name: def.type_name,
+                look: def.look,
+                roles: def.columns,
+                pools: def.pools,
+                parts: def.parts,
+                owned: owned as u32,
+                meta: meta.get(&def.hash).copied().unwrap_or(0),
+            });
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name).then(a.hash.cmp(&b.hash)));
+        Ok(out)
+    }
+
+    /// Adds a roll to the Chase list and returns its id. Chasing the same roll twice keeps one entry.
+    pub fn add_chase(&self, weapon: WeaponHash, perks: &[Vec<PerkHash>], added: &str) -> Result<i64> {
+        let mut perks: Vec<Vec<PerkHash>> = perks.to_vec();
+        for column in &mut perks {
+            column.sort();
+            column.dedup();
+        }
+        let json = serde_json::to_string(&perks)?;
+        let existing: Option<i64> = self
+            .conn
+            .query_row("SELECT id FROM chase WHERE weapon_hash = ?1 AND perks = ?2", params![weapon.0, json], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+        self.conn.execute(
+            "INSERT INTO chase(weapon_hash, perks, added) VALUES (?1, ?2, ?3)",
+            params![weapon.0, json, added],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// The Chase list, oldest first.
+    pub fn chases(&self) -> Result<Vec<ChaseRoll>> {
+        let mut stmt = self.conn.prepare("SELECT id, weapon_hash, perks, added FROM chase ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, u32>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, weapon, perks, added) = row?;
+            out.push(ChaseRoll { id, weapon: WeaponHash(weapon), perks: serde_json::from_str(&perks)?, added });
+        }
+        Ok(out)
+    }
+
+    /// Removes a roll from the Chase list; removing one that is not there does nothing.
+    pub fn remove_chase(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM chase WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     /// Full-text search over weapon names and types; prefix matching on each word.
@@ -268,7 +416,9 @@ impl Database {
 
     /// Replaces the whole vault with a fresh sync snapshot. Copies no longer owned are removed,
     /// and stored scores are dropped for any copy that is gone or has changed since it was scored.
-    pub fn replace_copies(&mut self, copies: &[WeaponCopy], synced_at: &str) -> Result<()> {
+    /// The first sync, or one with `fresh_start` (another account), is the baseline: none of its
+    /// copies count as new drops.
+    pub fn replace_copies(&mut self, copies: &[WeaponCopy], synced_at: &str, fresh_start: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
         let old: HashMap<String, (u32, u8, String, bool)> = {
             let mut stmt =
@@ -276,11 +426,18 @@ impl Database {
             stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?
                 .collect::<rusqlite::Result<_>>()?
         };
+        let seen: HashMap<String, String> = {
+            let mut stmt = tx.prepare("SELECT instance_id, first_seen FROM weapon_copy")?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        // The first sync is the baseline: nothing in it counts as a new drop.
+        let baseline = fresh_start || seen.is_empty();
         tx.execute("DELETE FROM weapon_copy", [])?;
         {
             let mut insert = tx.prepare(
-                "INSERT INTO weapon_copy(instance_id, weapon_hash, tier, columns, masterworked, locked, synced_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO weapon_copy(instance_id, weapon_hash, tier, columns, masterworked, locked, synced_at,
+                     stats, location, parts, first_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             let mut stale = tx.prepare("DELETE FROM copy_score WHERE instance_id = ?1")?;
             for c in copies {
@@ -296,19 +453,32 @@ impl Database {
                     columns,
                     c.masterworked,
                     c.locked,
-                    synced_at
+                    synced_at,
+                    serde_json::to_string(&c.stats)?,
+                    c.location.as_str(),
+                    serde_json::to_string(&c.parts)?,
+                    seen.get(&c.instance_id).map_or(if baseline { "0" } else { synced_at }, String::as_str)
                 ])?;
             }
         }
-        // Keep scores only for copies still owned.
+        // Keep scores and decisions only for copies still owned.
         tx.execute("DELETE FROM copy_score WHERE instance_id NOT IN (SELECT instance_id FROM weapon_copy)", [])?;
+        tx.execute("DELETE FROM copy_mark WHERE instance_id NOT IN (SELECT instance_id FROM weapon_copy)", [])?;
         tx.commit()?;
         Ok(())
     }
 
+    /// How many copies were first seen by the sync stamped `synced_at`.
+    pub fn first_seen_at(&self, synced_at: &str) -> Result<usize> {
+        let n: i64 =
+            self.conn.query_row("SELECT COUNT(*) FROM weapon_copy WHERE first_seen = ?1", [synced_at], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     pub fn copies(&self) -> Result<Vec<WeaponCopy>> {
         let mut stmt = self.conn.prepare(
-            "SELECT instance_id, weapon_hash, tier, columns, masterworked, locked FROM weapon_copy ORDER BY instance_id",
+            "SELECT instance_id, weapon_hash, tier, columns, masterworked, locked, stats, location, parts
+             FROM weapon_copy ORDER BY instance_id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -318,14 +488,27 @@ impl Database {
                 r.get::<_, String>(3)?,
                 r.get::<_, bool>(4)?,
                 r.get::<_, bool>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (instance_id, weapon, tier, columns, masterworked, locked) = row?;
+            let (instance_id, weapon, tier, columns, masterworked, locked, stats, location, parts) = row?;
             let tier = Tier::new(tier).ok_or_else(|| DbError::Corrupt(format!("tier {tier} on {instance_id}")))?;
             let columns: Vec<CopyColumn> = serde_json::from_str(&columns)?;
-            out.push(WeaponCopy { instance_id, weapon: WeaponHash(weapon), tier, columns, masterworked, locked });
+            out.push(WeaponCopy {
+                instance_id,
+                weapon: WeaponHash(weapon),
+                tier,
+                columns,
+                masterworked,
+                locked,
+                stats: serde_json::from_str(&stats)?,
+                location: CopyLocation::parse(&location),
+                parts: serde_json::from_str(&parts)?,
+            });
         }
         Ok(out)
     }
@@ -362,7 +545,8 @@ impl Database {
         tx.execute("DELETE FROM curated_roll WHERE source_id = ?1", [source_id])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO curated_roll(weapon_hash, context, columns, curator, source_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO curated_roll(weapon_hash, context, columns, curator, source_id, detail, origin)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             for roll in rolls {
                 stmt.execute(params![
@@ -370,7 +554,9 @@ impl Database {
                     roll.context.as_str(),
                     serde_json::to_string(&roll.columns)?,
                     roll.curator,
-                    source_id
+                    source_id,
+                    serde_json::to_string(roll)?,
+                    roll.source
                 ])?;
             }
         }
@@ -379,22 +565,79 @@ impl Database {
     }
 
     pub fn rolls(&self) -> Result<Vec<CuratedRoll>> {
-        let mut stmt =
-            self.conn.prepare("SELECT weapon_hash, context, columns, curator FROM curated_roll ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        self.rolls_where("", [])
+    }
+
+    /// Every curated roll for one weapon, in list order.
+    pub fn rolls_for(&self, weapon: WeaponHash) -> Result<Vec<CuratedRoll>> {
+        self.rolls_where("WHERE weapon_hash = ?1", [weapon.0])
+    }
+
+    fn rolls_where<P: rusqlite::Params>(&self, filter: &str, params: P) -> Result<Vec<CuratedRoll>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT weapon_hash, context, columns, curator, detail FROM curated_roll {filter} ORDER BY id"
+        ))?;
+        let rows = stmt.query_map(params, |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (weapon, context, columns, curator) = row?;
+            let (weapon, context, columns, curator, detail) = row?;
+            if !detail.is_empty() {
+                out.push(serde_json::from_str(&detail)?);
+                continue;
+            }
             out.push(CuratedRoll {
                 weapon: WeaponHash(weapon),
                 context: parse_context(&context)?,
                 columns: serde_json::from_str(&columns)?,
                 curator,
+                title: String::new(),
+                notes: String::new(),
+                tags: Vec::new(),
+                masterwork: String::new(),
+                mods: String::new(),
+                source: String::new(),
             });
         }
         Ok(out)
+    }
+
+    /// Records the player's decision on a copy ("keep", "shard" or "seen"), or clears it with `None`.
+    pub fn set_mark(&self, instance_id: &str, mark: Option<&str>, at: &str) -> Result<()> {
+        match mark {
+            Some(m) => {
+                if !["keep", "shard", "seen"].contains(&m) {
+                    return Err(DbError::Corrupt(format!("unknown mark {m:?}")));
+                }
+                self.conn.execute(
+                    "INSERT INTO copy_mark(instance_id, mark, marked_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(instance_id) DO UPDATE SET mark = excluded.mark, marked_at = excluded.marked_at",
+                    params![instance_id, m, at],
+                )?;
+            }
+            None => {
+                self.conn.execute("DELETE FROM copy_mark WHERE instance_id = ?1", [instance_id])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// How many separate wish-list sections recommend each weapon: ParaForge's meta measure
+    /// (curator consensus). Weapons no curator lists are missing from the map.
+    pub fn meta_counts(&self) -> Result<HashMap<WeaponHash, u32>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT weapon_hash, COUNT(DISTINCT CASE WHEN origin = '' THEN curator ELSE origin END)
+             FROM curated_roll GROUP BY weapon_hash",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((WeaponHash(r.get(0)?), r.get::<_, u32>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Stores the result of a scoring pass for one context, replacing that context's previous scores,
@@ -444,7 +687,8 @@ impl Database {
         tx.execute("DELETE FROM perk", [])?;
         {
             let mut w = tx.prepare(
-                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO weapon(hash, name, type_name, columns, socket_indexes, look, pools, parts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for d in weapons {
                 w.execute(params![
@@ -452,16 +696,36 @@ impl Database {
                     d.name,
                     d.type_name,
                     serde_json::to_string(&d.columns)?,
-                    serde_json::to_string(&d.socket_indexes)?
+                    serde_json::to_string(&d.socket_indexes)?,
+                    serde_json::to_string(&d.look)?,
+                    serde_json::to_string(&d.pools)?,
+                    serde_json::to_string(&d.parts)?
                 ])?;
             }
-            let mut p = tx.prepare("INSERT OR REPLACE INTO perk(hash, name, plug_category) VALUES (?1, ?2, ?3)")?;
+            let mut p = tx.prepare(
+                "INSERT OR REPLACE INTO perk(hash, name, plug_category, icon, description) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
             for perk in perks {
-                p.execute(params![perk.hash.0, perk.name, perk.plug_category])?;
+                p.execute(params![perk.hash.0, perk.name, perk.plug_category, perk.icon, perk.description])?;
             }
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Every known perk with its name, icon and description.
+    pub fn perks(&self) -> Result<Vec<PerkInfo>> {
+        let mut stmt = self.conn.prepare("SELECT hash, name, plug_category, icon, description FROM perk")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(PerkInfo {
+                hash: PerkHash(r.get(0)?),
+                name: r.get(1)?,
+                plug_category: r.get(2)?,
+                icon: r.get(3)?,
+                description: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn perk_names(&self) -> Result<HashMap<PerkHash, String>> {
@@ -473,9 +737,11 @@ impl Database {
     /// Every owned copy with its weapon name and its score in `context`, best first.
     pub fn vault_rows(&self, context: Context) -> Result<Vec<VaultRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.instance_id, c.weapon_hash, w.name, w.type_name, c.tier, c.masterworked, c.locked, s.detail
+            "SELECT c.instance_id, c.weapon_hash, w.name, w.type_name, c.tier, c.masterworked, c.locked, s.detail,
+                    w.look, w.columns, c.columns, c.stats, c.location, c.parts, c.first_seen, m.mark, m.marked_at
              FROM weapon_copy c
              JOIN weapon w ON w.hash = c.weapon_hash
+             LEFT JOIN copy_mark m ON m.instance_id = c.instance_id
              LEFT JOIN copy_score s ON s.instance_id = c.instance_id AND s.context = ?1
              ORDER BY s.score IS NULL, s.score DESC, w.name, c.instance_id",
         )?;
@@ -489,11 +755,39 @@ impl Database {
                 r.get::<_, bool>(5)?,
                 r.get::<_, bool>(6)?,
                 r.get::<_, Option<String>>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, String>(9)?,
+                r.get::<_, String>(10)?,
+                r.get::<_, String>(11)?,
+                r.get::<_, String>(12)?,
+                r.get::<_, String>(13)?,
+                r.get::<_, String>(14)?,
+                r.get::<_, Option<String>>(15)?,
+                r.get::<_, Option<String>>(16)?,
             ))
         })?;
+        let meta = self.meta_counts()?;
         let mut out = Vec::new();
         for row in rows {
-            let (instance_id, weapon, name, type_name, tier, masterworked, locked, detail) = row?;
+            let (
+                instance_id,
+                weapon,
+                name,
+                type_name,
+                tier,
+                masterworked,
+                locked,
+                detail,
+                look,
+                roles,
+                columns,
+                stats,
+                location,
+                parts,
+                first_seen,
+                mark,
+                marked_at,
+            ) = row?;
             out.push(VaultRow {
                 instance_id,
                 weapon: WeaponHash(weapon),
@@ -503,10 +797,53 @@ impl Database {
                 masterworked,
                 locked,
                 score: detail.map(|d| serde_json::from_str(&d)).transpose()?,
+                look: serde_json::from_str(&look)?,
+                roles: serde_json::from_str(&roles)?,
+                columns: serde_json::from_str(&columns)?,
+                stats: serde_json::from_str(&stats)?,
+                location: CopyLocation::parse(&location),
+                parts: serde_json::from_str(&parts)?,
+                meta: meta.get(&WeaponHash(weapon)).copied().unwrap_or(0),
+                first_seen: first_seen.parse().unwrap_or(0),
+                mark,
+                marked_at: marked_at.and_then(|m| m.parse().ok()).unwrap_or(0),
             });
         }
         Ok(out)
     }
+}
+
+/// Bungie TierType of Legendary weapons; Exotic is 6. Lower tiers are not in the Codex.
+const RARITY_LEGENDARY: u8 = 5;
+
+/// A roll on the Chase list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ChaseRoll {
+    pub id: i64,
+    pub weapon: WeaponHash,
+    /// The perks wanted in each column, in column order; an empty column takes any perk.
+    pub perks: Vec<Vec<PerkHash>>,
+    /// When it was added, Unix seconds.
+    pub added: String,
+}
+
+/// One weapon in the Codex.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CodexRow {
+    pub hash: WeaponHash,
+    pub name: String,
+    pub type_name: String,
+    pub look: WeaponLook,
+    /// What each perk column is, same order as `pools`.
+    pub roles: Vec<ColumnRole>,
+    /// Every perk that can currently roll in each column.
+    pub pools: Vec<Vec<PerkHash>>,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst sockets.
+    pub parts: Vec<WeaponPart>,
+    /// Copies the player owns.
+    pub owned: u32,
+    /// How many curator sources recommend it (see [`Database::meta_counts`]); 0 for none.
+    pub meta: u32,
 }
 
 /// One line of the vault list.
@@ -520,6 +857,24 @@ pub struct VaultRow {
     pub masterworked: bool,
     pub locked: bool,
     pub score: Option<CopyScore>,
+    pub look: WeaponLook,
+    /// What each perk column is (barrel, magazine, trait), same order as `columns`.
+    pub roles: Vec<ColumnRole>,
+    /// This copy's perks, column by column.
+    pub columns: Vec<CopyColumn>,
+    /// Stat values by Bungie stat hash.
+    pub stats: std::collections::BTreeMap<u32, i32>,
+    pub location: CopyLocation,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst on this copy.
+    pub parts: Vec<CopyPart>,
+    /// How many curator sources recommend this weapon; 0 for none.
+    pub meta: u32,
+    /// When ParaForge first saw this copy, Unix seconds; 0 for copies from the first sync.
+    pub first_seen: i64,
+    /// The player's decision: "keep", "shard" or "seen" (reviewed, no decision).
+    pub mark: Option<String>,
+    /// When the decision was made, Unix milliseconds; 0 without one.
+    pub marked_at: i64,
 }
 
 fn parse_context(value: &str) -> Result<Context> {

@@ -2,6 +2,7 @@
 //!
 //! Hashes are Bungie manifest hashes. Everything here is plain data: no I/O.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -86,6 +87,51 @@ pub enum ColumnRole {
     Trait,
 }
 
+/// A fixed part of a weapon that is not a random-perk column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PartKind {
+    /// The intrinsic frame, for example "Adaptive Frame", or an exotic's intrinsic perk.
+    Intrinsic,
+    /// The origin trait, for example "Veist Stinger".
+    Origin,
+    /// A legendary's masterwork (the stat it boosts).
+    Masterwork,
+    /// The weapon mod slot.
+    Mod,
+    /// An exotic's catalyst slot.
+    Catalyst,
+}
+
+/// One part socket on a weapon definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeaponPart {
+    pub kind: PartKind,
+    /// The item socket index.
+    pub socket_index: u8,
+    /// What this socket can hold on any copy. Filled for intrinsics and origin traits; masterwork,
+    /// mod and catalyst options are the same on every weapon of a type, so they stay empty here.
+    #[serde(default)]
+    pub pool: Vec<PerkHash>,
+    /// Placeholder plugs that mean the socket is empty ("Empty Mod Socket").
+    #[serde(default)]
+    pub empty: Vec<PerkHash>,
+}
+
+/// One part on an owned copy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CopyPart {
+    pub kind: PartKind,
+    /// What is in the socket now, `None` when it is empty.
+    pub plugged: Option<PerkHash>,
+    /// Whether the plugged perk is the enhanced version (enhanced origin traits on Tier 5 drops).
+    #[serde(default)]
+    pub enhanced: bool,
+    /// Every option the player can switch to in this socket (origin traits with two choices).
+    #[serde(default)]
+    pub options: Vec<PerkHash>,
+}
+
 /// One weapon in the game (manifest data, trimmed to what the core needs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeaponDef {
@@ -98,6 +144,50 @@ pub struct WeaponDef {
     /// The item socket index of each column, same length and order as `columns`.
     #[serde(default)]
     pub socket_indexes: Vec<u8>,
+    /// How the weapon looks and where it goes: icons, slot, element, ammo, rarity.
+    #[serde(default)]
+    pub look: WeaponLook,
+    /// Every perk that can currently roll in each column (base versions), same order as `columns`.
+    #[serde(default)]
+    pub pools: Vec<Vec<PerkHash>>,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst sockets, in socket order.
+    #[serde(default)]
+    pub parts: Vec<WeaponPart>,
+}
+
+/// Display data for a weapon, from Bungie's item definitions.
+///
+/// Image fields are bungie.net paths (for example `/common/destiny2_content/icons/...png`), empty when
+/// Bungie has none. The numbers keep Bungie's own enum values, so 0 always means unknown.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WeaponLook {
+    pub icon: String,
+    /// The season badge Bungie draws over the icon's top-left corner.
+    pub watermark: String,
+    /// A wide screenshot of the weapon, for the detail panel.
+    pub screenshot: String,
+    /// 1 Kinetic, 2 Energy, 3 Power.
+    pub slot: u8,
+    /// Bungie DamageType: 1 Kinetic, 2 Arc, 3 Thermal (Solar), 4 Void, 6 Stasis, 7 Strand.
+    pub damage: u8,
+    /// Bungie DestinyAmmunitionType: 1 Primary, 2 Special, 3 Heavy.
+    pub ammo: u8,
+    /// Bungie TierType: 5 Legendary (Superior), 6 Exotic.
+    pub rarity: u8,
+    /// Where it drops, from its Collections entry, for example "Last Wish raid". Empty when unknown.
+    pub source: String,
+    /// The hash of its Collections entry, 0 when it has none.
+    pub collectible: u32,
+    /// The champion it stuns on its own (intrinsic or exotic perk, not the seasonal artifact):
+    /// 1 Barrier (shield-piercing), 2 Overload (disruption), 3 Unstoppable (stagger); 0 none.
+    pub breaker: u8,
+    /// Has a crafting pattern (can be crafted at the Enclave).
+    pub craftable: bool,
+    /// An Adept, Timelost or Harrowed version (the harder-activity variant).
+    pub adept: bool,
+    /// The season it came out in (Bungie's season number, 1 = Red War); 0 when unknown.
+    pub season: u8,
 }
 
 /// One column on an owned copy.
@@ -108,6 +198,9 @@ pub struct CopyColumn {
     /// Whether the perk in this column is the enhanced version.
     #[serde(default)]
     pub enhanced: bool,
+    /// The perk selected right now (base version), when Bungie said; one of `options`.
+    #[serde(default)]
+    pub plugged: Option<PerkHash>,
 }
 
 /// One copy of a weapon the player owns.
@@ -123,6 +216,43 @@ pub struct WeaponCopy {
     pub masterworked: bool,
     #[serde(default)]
     pub locked: bool,
+    /// This copy's stat values by Bungie stat hash (impact, range, stability...), as the game shows them.
+    #[serde(default)]
+    pub stats: BTreeMap<u32, i32>,
+    #[serde(default)]
+    pub location: CopyLocation,
+    /// Intrinsic, origin trait, masterwork, mod and catalyst, same order as [`WeaponDef::parts`].
+    #[serde(default)]
+    pub parts: Vec<CopyPart>,
+}
+
+/// Where an owned copy is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopyLocation {
+    #[default]
+    Vault,
+    /// In a character's inventory, not equipped.
+    Inventory,
+    Equipped,
+}
+
+impl CopyLocation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CopyLocation::Vault => "vault",
+            CopyLocation::Inventory => "inventory",
+            CopyLocation::Equipped => "equipped",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "inventory" => CopyLocation::Inventory,
+            "equipped" => CopyLocation::Equipped,
+            _ => CopyLocation::Vault,
+        }
+    }
 }
 
 /// A recommended perk set for a weapon in one context.
@@ -133,6 +263,24 @@ pub struct CuratedRoll {
     /// Accepted perks per column. An empty list means any perk is fine in that column.
     pub columns: Vec<Vec<PerkHash>>,
     pub curator: String,
+    /// The roll's name, for example "Action Item - PvE Minor god 1".
+    #[serde(default)]
+    pub title: String,
+    /// The curator's explanation: what the roll is for and how to play it.
+    #[serde(default)]
+    pub notes: String,
+    /// Lowercase tags such as "pve", "god-pve", "mkb", "controller", "pve-boss".
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// The curator's masterwork pick, for example "Handling or Stability". Empty when not given.
+    #[serde(default)]
+    pub masterwork: String,
+    /// The curator's mod pick, for example "Minor Spec". Empty when not given.
+    #[serde(default)]
+    pub mods: String,
+    /// The wish-list section the roll came from, which counts as one curator voice for meta ranking.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// A perk's display data from the manifest.
@@ -142,6 +290,11 @@ pub struct PerkInfo {
     pub name: String,
     /// Bungie's plug category identifier, for example "barrels" or "frames".
     pub plug_category: String,
+    /// bungie.net path of the perk's icon, empty when Bungie has none.
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Provenance of a value, so the UI can badge it (official, community, ParaForge).

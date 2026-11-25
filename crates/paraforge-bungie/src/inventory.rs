@@ -5,8 +5,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use paraforge_core::{ColumnRole, CopyColumn, PerkHash, PerkInfo, Tier, WeaponCopy, WeaponDef, WeaponHash};
-use serde::Deserialize;
+use paraforge_core::{
+    ColumnRole, CopyColumn, CopyLocation, CopyPart, PartKind, PerkHash, PerkInfo, Tier, WeaponCopy, WeaponDef,
+    WeaponHash, WeaponLook, WeaponPart,
+};
+use serde::{Deserialize, Serialize};
 
 /// DestinyItemType.Weapon.
 const ITEM_TYPE_WEAPON: i32 = 3;
@@ -18,6 +21,12 @@ const ICH_DUMMIES: u32 = 3_109_687_656;
 const ICH_ORIGIN_TRAITS: u32 = 2_779_167_812;
 /// SocketCategory "WEAPON PERKS".
 const SOCKET_CATEGORY_WEAPON_PERKS: u32 = 4_241_085_061;
+/// SocketCategory "INTRINSIC TRAITS" (the frame, or an exotic's intrinsic perk).
+const SOCKET_CATEGORY_INTRINSIC: u32 = 3_956_125_808;
+/// SocketCategory "WEAPON MODS" (mod, masterwork, catalyst).
+const SOCKET_CATEGORY_WEAPON_MODS: u32 = 2_685_412_949;
+/// Bungie TierType of Exotic items.
+const RARITY_EXOTIC: u8 = 6;
 /// Socket types that sit in the perk category but are not perk columns: kill tracker, masterwork.
 const SOCKET_TYPES_NOT_COLUMNS: [u32; 2] = [1_282_012_138, 2_218_962_841];
 
@@ -69,12 +78,34 @@ impl EnhancedPerks {
 #[serde(rename_all = "camelCase", default)]
 pub struct RawDisplay {
     pub name: String,
+    pub description: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawInventoryBlock {
+    pub tier_type: u8,
+    pub bucket_type_hash: u32,
+    /// Set on weapons that have a crafting pattern.
+    pub recipe_item_hash: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawEquippingBlock {
+    pub ammo_type: u8,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RawPlugItem {
     pub plug_item_hash: u32,
+    /// In a random-roll plug set: false for perks that no longer drop. Missing means it can roll.
+    pub currently_can_roll: Option<bool>,
+    /// On an owned weapon: false when the game will not let the player select this perk now.
+    pub can_insert: Option<bool>,
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -119,6 +150,110 @@ pub struct RawItemDef {
     pub sockets: Option<RawSockets>,
     pub plug: Option<RawPlug>,
     pub redacted: bool,
+    pub icon_watermark: String,
+    pub screenshot: String,
+    pub inventory: RawInventoryBlock,
+    pub equipping_block: RawEquippingBlock,
+    pub default_damage_type: u8,
+    pub collectible_hash: Option<u32>,
+    /// DestinyBreakerType: 1 ShieldPiercing, 2 Disruption, 3 Stagger.
+    pub breaker_type: u8,
+}
+
+/// The fields of `DestinyCollectibleDefinition` that ParaForge reads.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawCollectibleDef {
+    pub source_string: String,
+}
+
+/// Bungie writes sources as "Source: Last Wish raid"; the prefix adds nothing on screen.
+fn clean_source(text: &str) -> String {
+    let text = text.trim();
+    text.strip_prefix("Source:").map(str::trim).unwrap_or(text).to_string()
+}
+
+/// Inventory buckets of the three weapon slots.
+pub const BUCKET_KINETIC: u32 = 1_498_876_634;
+pub const BUCKET_ENERGY: u32 = 2_465_295_065;
+pub const BUCKET_POWER: u32 = 953_998_645;
+
+/// Item hash -> season, from d2-additional-info.
+const SEASONS_JSON: &str = include_str!("../data/seasons.json");
+/// Season badge (watermark) -> season, for items the list above does not have yet.
+const WATERMARK_SEASONS_JSON: &str = include_str!("../data/watermark-to-season.json");
+/// Item hash -> breaker type hash, for champion stuns that come from an intrinsic or exotic perk.
+const EXTENDED_BREAKER_JSON: &str = include_str!("../data/extended-breaker.json");
+/// DestinyBreakerTypeDefinition hashes.
+const BREAKER_SHIELD_PIERCING: u32 = 485_622_768;
+const BREAKER_DISRUPTION: u32 = 2_611_060_930;
+const BREAKER_STAGGER: u32 = 3_178_805_705;
+
+/// Seasons and champion breakers that the item database does not say directly.
+pub struct ExtraInfo {
+    seasons: HashMap<String, u8>,
+    watermarks: HashMap<String, u8>,
+    breakers: HashMap<String, u32>,
+}
+
+impl ExtraInfo {
+    pub fn bundled() -> Self {
+        Self {
+            seasons: serde_json::from_str(SEASONS_JSON).unwrap_or_default(),
+            watermarks: serde_json::from_str(WATERMARK_SEASONS_JSON).unwrap_or_default(),
+            breakers: serde_json::from_str(EXTENDED_BREAKER_JSON).unwrap_or_default(),
+        }
+    }
+
+    fn season(&self, item: &RawItemDef) -> u8 {
+        self.seasons
+            .get(&item.hash.to_string())
+            .or_else(|| self.watermarks.get(&item.icon_watermark))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn breaker(&self, item: &RawItemDef) -> u8 {
+        if (1..=3).contains(&item.breaker_type) {
+            return item.breaker_type;
+        }
+        match self.breakers.get(&item.hash.to_string()) {
+            Some(&BREAKER_SHIELD_PIERCING) => 1,
+            Some(&BREAKER_DISRUPTION) => 2,
+            Some(&BREAKER_STAGGER) => 3,
+            _ => 0,
+        }
+    }
+}
+
+/// Adept-style variants carry their tag in the name, for example "Fatebringer (Timelost)".
+fn is_adept(name: &str) -> bool {
+    ["(Adept)", "(Timelost)", "(Harrowed)"].iter().any(|tag| name.trim_end().ends_with(tag))
+}
+
+fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>, extra: &ExtraInfo) -> WeaponLook {
+    let collectible = item.collectible_hash.unwrap_or(0);
+    let source = collectibles.get(&collectible.to_string()).map(|c| clean_source(&c.source_string)).unwrap_or_default();
+    WeaponLook {
+        icon: item.display_properties.icon.clone(),
+        watermark: item.icon_watermark.clone(),
+        screenshot: item.screenshot.clone(),
+        slot: match item.inventory.bucket_type_hash {
+            BUCKET_KINETIC => 1,
+            BUCKET_ENERGY => 2,
+            BUCKET_POWER => 3,
+            _ => 0,
+        },
+        damage: item.default_damage_type,
+        ammo: item.equipping_block.ammo_type,
+        rarity: item.inventory.tier_type,
+        source,
+        collectible,
+        breaker: extra.breaker(item),
+        craftable: item.inventory.recipe_item_hash.is_some_and(|h| h != 0),
+        adept: is_adept(&item.display_properties.name),
+        season: extra.season(item),
+    }
 }
 
 /// The fields of `DestinyPlugSetDefinition` that ParaForge reads.
@@ -160,6 +295,32 @@ fn candidate_plugs(entry: &RawSocketEntry, plug_sets: &HashMap<String, RawPlugSe
     out
 }
 
+/// The perks a column can roll today, as base (non-enhanced) hashes. For random-roll columns this is
+/// the randomized plug set minus retired perks; for fixed columns, every plug the socket offers.
+fn column_pool(
+    entry: &RawSocketEntry,
+    plug_sets: &HashMap<String, RawPlugSetDef>,
+    enhanced: &EnhancedPerks,
+) -> Vec<PerkHash> {
+    let random = entry.randomized_plug_set_hash.and_then(|h| plug_sets.get(&h.to_string()));
+    let raw: Vec<u32> = match random {
+        Some(set) => set
+            .reusable_plug_items
+            .iter()
+            .filter(|p| p.currently_can_roll != Some(false))
+            .map(|p| p.plug_item_hash)
+            .collect(),
+        None => candidate_plugs(entry, plug_sets),
+    };
+    let mut pool: Vec<PerkHash> = Vec::new();
+    for hash in raw.into_iter().filter(|h| *h != 0).map(|h| PerkHash(enhanced.base(h))) {
+        if !pool.contains(&hash) {
+            pool.push(hash);
+        }
+    }
+    pool
+}
+
 fn column_role(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Option<ColumnRole> {
     let mut categories = HashSet::new();
     for hash in plugs {
@@ -183,47 +344,149 @@ fn column_role(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Option<Col
     }
 }
 
-/// Builds the weapon catalog from the `DestinyInventoryItemDefinition` and `DestinyPlugSetDefinition`
-/// tables (each a JSON object keyed by hash).
+/// Weapon mod plug categories: `v400.weapon.mod_guns`, `v400.weapon.mod_empty`, `v460.weapon.mod_sword`...
+fn is_mod_category(category: &str) -> bool {
+    category.contains("weapon.mod_")
+}
+
+/// Masterwork and catalyst plug categories (`v400.plugs.weapons.masterworks.stat.range`,
+/// `v400.empty.exotic.masterwork`, per-exotic `...masterwork`), but not kill trackers or effects.
+fn is_masterwork_category(category: &str) -> bool {
+    category == "catalysts"
+        || (category.contains("masterwork")
+            && !category.contains("trackers")
+            && !category.contains("toggle_vfx")
+            && !category.contains("ghost"))
+}
+
+/// What a non-column socket is, from the plugs it can hold.
+fn part_kind(plugs: &[u32], items: &HashMap<String, RawItemDef>, exotic: bool) -> Option<PartKind> {
+    let mut found: Option<PartKind> = None;
+    let rank = |k: PartKind| match k {
+        PartKind::Origin => 0,
+        PartKind::Intrinsic => 1,
+        PartKind::Catalyst | PartKind::Masterwork => 2,
+        PartKind::Mod => 3,
+    };
+    for hash in plugs {
+        let Some(def) = items.get(&hash.to_string()) else { continue };
+        let category = def.plug.as_ref().map(|p| p.plug_category_identifier.as_str()).unwrap_or("");
+        let kind = if def.item_category_hashes.contains(&ICH_ORIGIN_TRAITS) || category == "origins" {
+            PartKind::Origin
+        } else if category == "intrinsics" {
+            PartKind::Intrinsic
+        } else if is_masterwork_category(category) {
+            if exotic { PartKind::Catalyst } else { PartKind::Masterwork }
+        } else if is_mod_category(category) {
+            PartKind::Mod
+        } else {
+            continue;
+        };
+        if found.is_none_or(|f| rank(kind) < rank(f)) {
+            found = Some(kind);
+        }
+    }
+    found
+}
+
+/// Plugs that stand for an empty socket ("Empty Mod Socket", "Empty Catalyst Socket").
+fn empty_plugs(plugs: &[u32], items: &HashMap<String, RawItemDef>) -> Vec<PerkHash> {
+    plugs
+        .iter()
+        .filter(|h| {
+            items.get(&h.to_string()).is_some_and(|d| {
+                d.plug.as_ref().is_some_and(|p| p.plug_category_identifier.contains("empty"))
+                    || d.display_properties.name.starts_with("Empty ")
+            })
+        })
+        .map(|h| PerkHash(*h))
+        .collect()
+}
+
+/// Builds the weapon catalog from the `DestinyInventoryItemDefinition`, `DestinyPlugSetDefinition` and
+/// `DestinyCollectibleDefinition` tables (each a JSON object keyed by hash).
 pub fn build_catalog(
     items: &HashMap<String, RawItemDef>,
     plug_sets: &HashMap<String, RawPlugSetDef>,
+    collectibles: &HashMap<String, RawCollectibleDef>,
     enhanced: &EnhancedPerks,
 ) -> Catalog {
     let mut catalog = Catalog::default();
     let mut perk_hashes = HashSet::new();
+    let extra = ExtraInfo::bundled();
     for item in items.values().filter(|i| is_weapon(i)) {
-        let Some(sockets) = &item.sockets else { continue };
-        let Some(category) =
-            sockets.socket_categories.iter().find(|c| c.socket_category_hash == SOCKET_CATEGORY_WEAPON_PERKS)
-        else {
-            continue;
-        };
         let mut columns = Vec::new();
         let mut socket_indexes = Vec::new();
-        for &index in &category.socket_indexes {
-            let Ok(index_u8) = u8::try_from(index) else { continue };
-            let Some(entry) = sockets.socket_entries.get(index_u8 as usize) else { continue };
-            if entry.socket_type_hash == 0 || SOCKET_TYPES_NOT_COLUMNS.contains(&entry.socket_type_hash) {
-                continue;
-            }
-            let plugs = candidate_plugs(entry, plug_sets);
-            if let Some(role) = column_role(&plugs, items) {
-                columns.push(role);
-                socket_indexes.push(index_u8);
-                perk_hashes.extend(plugs.iter().map(|p| enhanced.base(*p)));
+        let mut pools = Vec::new();
+        let mut parts = Vec::new();
+        let exotic = item.inventory.tier_type == RARITY_EXOTIC;
+        if let Some(sockets) = &item.sockets {
+            let mut indexes: Vec<(u32, i32)> = sockets
+                .socket_categories
+                .iter()
+                .filter(|c| {
+                    [SOCKET_CATEGORY_INTRINSIC, SOCKET_CATEGORY_WEAPON_PERKS, SOCKET_CATEGORY_WEAPON_MODS]
+                        .contains(&c.socket_category_hash)
+                })
+                .flat_map(|c| c.socket_indexes.iter().map(move |i| (c.socket_category_hash, *i)))
+                .collect();
+            indexes.sort_by_key(|(_, i)| *i);
+            indexes.dedup_by_key(|(_, i)| *i);
+            for (category, index) in indexes {
+                let Ok(index_u8) = u8::try_from(index) else { continue };
+                let Some(entry) = sockets.socket_entries.get(index_u8 as usize) else { continue };
+                if entry.socket_type_hash == 0 {
+                    continue;
+                }
+                let plugs = candidate_plugs(entry, plug_sets);
+                let column = (category == SOCKET_CATEGORY_WEAPON_PERKS
+                    && !SOCKET_TYPES_NOT_COLUMNS.contains(&entry.socket_type_hash))
+                .then(|| column_role(&plugs, items))
+                .flatten();
+                if let Some(role) = column {
+                    columns.push(role);
+                    socket_indexes.push(index_u8);
+                    pools.push(column_pool(entry, plug_sets, enhanced));
+                    perk_hashes.extend(plugs.iter().map(|p| enhanced.base(*p)));
+                } else if let Some(kind) = part_kind(&plugs, items, exotic) {
+                    perk_hashes.extend(plugs.iter().map(|p| enhanced.base(*p)));
+                    let pool = match kind {
+                        PartKind::Intrinsic | PartKind::Origin => {
+                            let mut pool: Vec<PerkHash> = Vec::new();
+                            for p in plugs.iter().map(|p| PerkHash(enhanced.base(*p))) {
+                                if !pool.contains(&p) {
+                                    pool.push(p);
+                                }
+                            }
+                            pool
+                        }
+                        _ => Vec::new(),
+                    };
+                    parts.push(WeaponPart { kind, socket_index: index_u8, pool, empty: empty_plugs(&plugs, items) });
+                }
             }
         }
-        if columns.is_empty() {
-            continue;
-        }
+        // Weapons without random perk columns (most exotics) are kept, so they still show in the vault.
         catalog.weapons.push(WeaponDef {
             hash: WeaponHash(item.hash),
             name: item.display_properties.name.clone(),
             type_name: item.item_type_display_name.clone(),
             columns,
             socket_indexes,
+            look: look(item, collectibles, &extra),
+            pools,
+            parts,
         });
+    }
+    // Every mod, masterwork and catalyst plug, since a copy can hold one its definition does not list.
+    for (key, def) in items {
+        let Some(plug) = &def.plug else { continue };
+        let category = plug.plug_category_identifier.as_str();
+        if (is_mod_category(category) || is_masterwork_category(category))
+            && let Ok(hash) = key.parse::<u32>()
+        {
+            perk_hashes.insert(hash);
+        }
     }
     for hash in perk_hashes {
         if let Some(def) = items.get(&hash.to_string()) {
@@ -231,6 +494,8 @@ pub fn build_catalog(
                 hash: PerkHash(hash),
                 name: def.display_properties.name.clone(),
                 plug_category: def.plug.as_ref().map(|p| p.plug_category_identifier.clone()).unwrap_or_default(),
+                icon: def.display_properties.icon.clone(),
+                description: def.display_properties.description.clone(),
             });
         }
     }
@@ -247,6 +512,8 @@ pub struct RawItem {
     pub item_hash: u32,
     pub item_instance_id: Option<String>,
     pub state: u32,
+    /// The bucket the item sits in now: a weapon slot on a character, the vault, the Postmaster.
+    pub bucket_hash: u32,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -267,6 +534,34 @@ impl<T> Default for Component<T> {
     fn default() -> Self {
         Self { data: None, privacy: 0 }
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawStat {
+    pub stat_hash: u32,
+    pub value: i32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct RawItemStats {
+    pub stats: HashMap<String, RawStat>,
+}
+
+/// Profile component 100: who the player is.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawProfileData {
+    pub user_info: RawUserInfo,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawUserInfo {
+    pub display_name: String,
+    pub bungie_global_display_name: String,
+    pub bungie_global_display_name_code: Option<u16>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -299,13 +594,52 @@ pub struct RawItemComponents {
     pub instances: Component<HashMap<String, RawInstance>>,
     pub sockets: Component<HashMap<String, RawItemSockets>>,
     pub reusable_plugs: Component<HashMap<String, RawReusablePlugs>>,
+    /// Stats are optional: without them the weapon page just shows no stat bars.
+    pub stats: Component<HashMap<String, RawItemStats>>,
+}
+
+/// Profile component 200: one character.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawCharacter {
+    pub date_last_played: String,
+    pub light: i32,
+    /// 0 Titan, 1 Hunter, 2 Warlock.
+    pub class_type: i32,
+    pub emblem_path: String,
+    pub emblem_background_path: String,
+}
+
+/// A character, for picking who gets a weapon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Character {
+    pub id: String,
+    /// "Titan", "Hunter" or "Warlock".
+    pub class: String,
+    pub light: i32,
+    /// ISO time Bungie last saw the character played.
+    pub last_played: String,
+    pub emblem: String,
+    pub emblem_background: String,
+}
+
+pub fn class_name(class_type: i32) -> &'static str {
+    match class_type {
+        0 => "Titan",
+        1 => "Hunter",
+        2 => "Warlock",
+        _ => "Guardian",
+    }
 }
 
 /// The parts of a `DestinyProfileResponse` that ParaForge reads.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RawProfile {
+    pub profile: Component<RawProfileData>,
     pub profile_inventory: Component<RawItemList>,
+    /// Optional: only the character picker for moving weapons needs it.
+    pub characters: Component<HashMap<String, RawCharacter>>,
     pub character_inventories: Component<HashMap<String, RawItemList>>,
     pub character_equipment: Component<HashMap<String, RawItemList>>,
     pub item_components: RawItemComponents,
@@ -327,6 +661,42 @@ impl RawProfile {
         .into_iter()
         .filter_map(|(name, missing)| missing.then_some(name))
         .collect()
+    }
+
+    /// The player's characters, most recently played first.
+    pub fn characters(&self) -> Vec<Character> {
+        let mut out: Vec<Character> = self
+            .characters
+            .data
+            .iter()
+            .flatten()
+            .map(|(id, c)| Character {
+                id: id.clone(),
+                class: class_name(c.class_type).to_string(),
+                light: c.light,
+                last_played: c.date_last_played.clone(),
+                emblem: c.emblem_path.clone(),
+                emblem_background: c.emblem_background_path.clone(),
+            })
+            .collect();
+        // ISO times sort as text.
+        out.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.id.cmp(&b.id)));
+        out
+    }
+
+    /// The player's Bungie Name, for example "NightOwl#4821", when Bungie sent it.
+    pub fn player_name(&self) -> Option<String> {
+        let info = &self.profile.data.as_ref()?.user_info;
+        if !info.bungie_global_display_name.is_empty() {
+            Some(match info.bungie_global_display_name_code {
+                Some(code) => format!("{}#{code:04}", info.bungie_global_display_name),
+                None => info.bungie_global_display_name.clone(),
+            })
+        } else if !info.display_name.is_empty() {
+            Some(info.display_name.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -350,25 +720,31 @@ pub fn read_profile(
         characters_hidden: profile.character_inventories.data.is_none() || profile.character_equipment.data.is_none(),
         ..Default::default()
     };
-    let mut lists: Vec<&RawItemList> = Vec::new();
-    lists.extend(profile.profile_inventory.data.iter());
-    for chars in [&profile.character_inventories, &profile.character_equipment] {
+    let mut lists: Vec<(CopyLocation, &RawItemList)> = Vec::new();
+    lists.extend(profile.profile_inventory.data.iter().map(|l| (CopyLocation::Vault, l)));
+    for (location, chars) in [
+        (CopyLocation::Inventory, &profile.character_inventories),
+        (CopyLocation::Equipped, &profile.character_equipment),
+    ] {
         if let Some(map) = &chars.data {
             let mut ids: Vec<&String> = map.keys().collect();
             ids.sort();
-            lists.extend(ids.into_iter().map(|id| &map[id]));
+            lists.extend(ids.into_iter().map(|id| (location, &map[id])));
         }
     }
     let comps = &profile.item_components;
     let mut seen = HashSet::new();
-    for item in lists.into_iter().flat_map(|l| &l.items) {
+    for (location, item) in lists.into_iter().flat_map(|(loc, l)| l.items.iter().map(move |i| (loc, i))) {
         let Some(id) = &item.item_instance_id else { continue };
         let Some(def) = weapons.get(&WeaponHash(item.item_hash)) else { continue };
         if !seen.insert(id.clone()) {
             continue;
         }
         match read_copy(id, item, def, comps, enhanced) {
-            Some(copy) => out.copies.push(copy),
+            Some(mut copy) => {
+                copy.location = location;
+                out.copies.push(copy);
+            }
             None => out.unreadable.push(id.clone()),
         }
     }
@@ -393,7 +769,8 @@ fn read_copy(
             .and_then(|r| r.plugs.get(&index.to_string()))
             .map(|plugs| plugs.iter().map(|p| p.plug_item_hash).collect())
             .unwrap_or_default();
-        if let Some(plugged) = sockets.sockets.get(index as usize).and_then(|s| s.plug_hash)
+        let selected = sockets.sockets.get(index as usize).and_then(|s| s.plug_hash).filter(|h| *h != 0);
+        if let Some(plugged) = selected
             && !raw.contains(&plugged)
         {
             raw.push(plugged);
@@ -405,11 +782,42 @@ fn read_copy(
                 options.push(perk);
             }
         }
-        columns.push(CopyColumn { options, enhanced: is_enhanced });
+        columns.push(CopyColumn {
+            options,
+            enhanced: is_enhanced,
+            plugged: selected.map(|h| PerkHash(enhanced.base(h))),
+        });
     }
     if def.socket_indexes.len() != def.columns.len() {
         return None;
     }
+    let parts = def
+        .parts
+        .iter()
+        .map(|part| {
+            let raw = sockets.sockets.get(part.socket_index as usize).and_then(|s| s.plug_hash).filter(|h| *h != 0);
+            let plugged = raw.filter(|h| !part.empty.contains(&PerkHash(*h)));
+            // A picked-up catalyst sits in its socket while its objectives run; it only counts once
+            // the game marks the exotic as masterworked.
+            let plugged = plugged.filter(|_| part.kind != PartKind::Catalyst || item.state & STATE_MASTERWORK != 0);
+            let mut options: Vec<PerkHash> = Vec::new();
+            if part.kind == PartKind::Origin {
+                let listed = reusable.and_then(|r| r.plugs.get(&part.socket_index.to_string()));
+                for p in listed.into_iter().flatten().map(|p| p.plug_item_hash).chain(plugged) {
+                    let base = PerkHash(enhanced.base(p));
+                    if p != 0 && !options.contains(&base) {
+                        options.push(base);
+                    }
+                }
+            }
+            CopyPart {
+                kind: part.kind,
+                plugged: plugged.map(|h| PerkHash(enhanced.base(h))),
+                enhanced: plugged.is_some_and(|h| enhanced.is_enhanced(h)),
+                options,
+            }
+        })
+        .collect();
     Some(WeaponCopy {
         instance_id: id.to_string(),
         weapon: def.hash,
@@ -417,6 +825,15 @@ fn read_copy(
         columns,
         masterworked: item.state & STATE_MASTERWORK != 0,
         locked: item.state & STATE_LOCKED != 0,
+        stats: comps
+            .stats
+            .data
+            .as_ref()
+            .and_then(|d| d.get(id))
+            .map(|s| s.stats.values().map(|stat| (stat.stat_hash, stat.value)).collect())
+            .unwrap_or_default(),
+        location: CopyLocation::Vault,
+        parts,
     })
 }
 
@@ -456,8 +873,11 @@ mod tests {
     /// origin trait, kill tracker, plus a cosmetic socket outside the perk category.
     fn manifest() -> (HashMap<String, RawItemDef>, HashMap<String, RawPlugSetDef>) {
         let weapon = item(serde_json::json!({
-            "hash": 1000, "displayProperties": {"name": "Test Hand Cannon"}, "itemTypeDisplayName": "Hand Cannon",
-            "itemType": 3, "itemCategoryHashes": [1, 6],
+            "hash": 1000, "displayProperties": {"name": "Test Hand Cannon", "icon": "/icons/hc.jpg"},
+            "itemTypeDisplayName": "Hand Cannon", "itemType": 3, "itemCategoryHashes": [1, 6],
+            "iconWatermark": "/icons/season.png", "screenshot": "/screens/hc.jpg",
+            "inventory": {"tierType": 5, "bucketTypeHash": 2465295065u32},
+            "equippingBlock": {"ammoType": 1}, "defaultDamageType": 3, "collectibleHash": 900,
             "sockets": {
                 "socketEntries": [
                     {"socketTypeHash": 1, "singleInitialItemHash": 10},
@@ -467,43 +887,68 @@ mod tests {
                     {"socketTypeHash": 4, "singleInitialItemHash": 0, "randomizedPlugSetHash": 504},
                     {"socketTypeHash": 5, "singleInitialItemHash": 4248210736u32},
                     {"socketTypeHash": 6, "singleInitialItemHash": 60, "reusablePlugSetHash": 506},
-                    {"socketTypeHash": 1282012138, "singleInitialItemHash": 70}
+                    {"socketTypeHash": 1282012138, "singleInitialItemHash": 70},
+                    {"socketTypeHash": 7, "singleInitialItemHash": 80, "reusablePlugSetHash": 507},
+                    {"socketTypeHash": 8, "singleInitialItemHash": 90}
                 ],
                 "socketCategories": [
                     {"socketCategoryHash": 3956125808u32, "socketIndexes": [0]},
                     {"socketCategoryHash": 4241085061u32, "socketIndexes": [1, 2, 3, 4, 6, 7]},
-                    {"socketCategoryHash": 2048875504, "socketIndexes": [5]}
+                    {"socketCategoryHash": 2048875504, "socketIndexes": [5]},
+                    {"socketCategoryHash": 2685412949u32, "socketIndexes": [8, 9]}
                 ]
             }
         }));
         let dummy = item(serde_json::json!({
             "hash": 2000, "displayProperties": {"name": "Dummy"}, "itemType": 3, "itemCategoryHashes": [1, 3109687656u32]
         }));
+        let exotic = item(serde_json::json!({
+            "hash": 3000, "displayProperties": {"name": "Test Exotic"}, "itemTypeDisplayName": "Rocket Launcher",
+            "itemType": 3, "itemCategoryHashes": [1, 13],
+            "inventory": {"tierType": 6, "bucketTypeHash": 953998645}, "equippingBlock": {"ammoType": 3},
+            "defaultDamageType": 2
+        }));
         let mut items: HashMap<String, RawItemDef> = [
             ("1000".to_string(), weapon),
             ("2000".to_string(), dummy),
+            ("3000".to_string(), exotic),
             plug(10, "Adaptive Frame", "intrinsics"),
             plug(11, "Arrowhead Brake", "barrels"),
             plug(12, "Hammer-Forged Rifling", "barrels"),
             plug(21, "Ricochet Rounds", "magazines"),
             plug(31, "Rapid Hit", "frames"),
             plug(32, "Outlaw", "frames"),
+            plug(33, "Retired Perk", "frames"),
             plug(41, "Kill Clip", "frames"),
             plug(42, "Explosive Payload", "frames"),
             plug(60, "Origin", "origins"),
+            plug(70, "Kill Tracker", "v400.plugs.weapons.masterworks.trackers"),
+            plug(80, "Empty Mod Socket", "v400.weapon.mod_empty"),
+            plug(81, "Backup Mag", "v400.weapon.mod_magazine"),
+            plug(90, "Masterworked: Range", "v400.plugs.weapons.masterworks.stat.range"),
+            plug(91, "Masterworked: Handling", "v400.plugs.weapons.masterworks.stat.handling"),
         ]
         .into_iter()
         .collect();
         items.get_mut("60").unwrap().item_category_hashes = vec![ICH_ORIGIN_TRAITS];
         let set = |hashes: &[u32]| RawPlugSetDef {
-            reusable_plug_items: hashes.iter().map(|h| RawPlugItem { plug_item_hash: *h }).collect(),
+            reusable_plug_items: hashes
+                .iter()
+                // 33 is a retired perk: it is in the set but no longer drops.
+                .map(|h| RawPlugItem {
+                    plug_item_hash: *h,
+                    currently_can_roll: (*h == 33).then_some(false),
+                    ..Default::default()
+                })
+                .collect(),
         };
         let sets = [
             ("501", set(&[11, 12])),
             ("502", set(&[21])),
-            ("503", set(&[31, 32])),
+            ("503", set(&[31, 32, 33])),
             ("504", set(&[41, 42])),
             ("506", set(&[60])),
+            ("507", set(&[80, 81])),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -511,12 +956,24 @@ mod tests {
         (items, sets)
     }
 
+    fn collectibles() -> HashMap<String, RawCollectibleDef> {
+        [("900".to_string(), RawCollectibleDef { source_string: "Source: Last Wish raid".into() })]
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn sources_lose_their_prefix() {
+        assert_eq!(clean_source("Source: Last Wish raid"), "Last Wish raid");
+        assert_eq!(clean_source("  Exotic quest  "), "Exotic quest");
+    }
+
     #[test]
     fn catalog_finds_random_roll_columns() {
         let (items, sets) = manifest();
-        let c = build_catalog(&items, &sets, &enhanced());
-        assert_eq!(c.weapons.len(), 1, "dummies are skipped");
-        let w = &c.weapons[0];
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        assert_eq!(c.weapons.len(), 2, "dummies are skipped");
+        let w = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
         assert_eq!(w.name, "Test Hand Cannon");
         assert_eq!(w.type_name, "Hand Cannon");
         use ColumnRole::*;
@@ -524,7 +981,108 @@ mod tests {
         assert_eq!(w.socket_indexes, vec![1, 2, 3, 4], "origin trait and kill tracker are not columns");
         let names: Vec<&str> = c.perks.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"Outlaw") && names.contains(&"Arrowhead Brake"));
-        assert!(!names.contains(&"Origin"));
+        assert!(names.contains(&"Origin") && names.contains(&"Backup Mag"), "part plugs get names too");
+        assert!(!names.contains(&"Kill Tracker"));
+        let pool = |hashes: &[u32]| hashes.iter().map(|h| PerkHash(*h)).collect::<Vec<_>>();
+        assert_eq!(
+            w.pools,
+            vec![pool(&[11, 12]), pool(&[21]), pool(&[31, 32]), pool(&[41, 42])],
+            "each column's pool, without the retired perk"
+        );
+    }
+
+    #[test]
+    fn catalog_finds_frame_origin_mod_and_masterwork() {
+        let (items, sets) = manifest();
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        let w = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
+        let kinds: Vec<(PartKind, u8)> = w.parts.iter().map(|p| (p.kind, p.socket_index)).collect();
+        assert_eq!(
+            kinds,
+            vec![(PartKind::Intrinsic, 0), (PartKind::Origin, 6), (PartKind::Mod, 8), (PartKind::Masterwork, 9)],
+            "kill tracker and cosmetics are not parts"
+        );
+        assert_eq!(w.parts[0].pool, vec![PerkHash(10)]);
+        assert_eq!(w.parts[1].pool, vec![PerkHash(60)]);
+        assert_eq!(w.parts[2].empty, vec![PerkHash(80)], "the empty mod plug is known");
+        let names: Vec<&str> = c.perks.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"Masterworked: Handling"), "every masterwork plug is named, even unlisted ones");
+    }
+
+    #[test]
+    fn copies_read_their_parts() {
+        let (items, sets) = manifest();
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        let def = c.weapons.into_iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
+        let plugged = |hashes: &[u32]| -> Vec<serde_json::Value> {
+            hashes.iter().map(|h| serde_json::json!({"plugHash": h})).collect()
+        };
+        let profile: RawProfile = serde_json::from_value(serde_json::json!({
+            "profileInventory": {"data": {"items": [
+                {"itemHash": 1000, "itemInstanceId": "a"}, {"itemHash": 1000, "itemInstanceId": "b"}
+            ]}},
+            "itemComponents": {
+                "instances": {"data": {}},
+                "sockets": {"data": {
+                    "a": {"sockets": plugged(&[10, 11, 21, 31, 41, 0, 60, 70, 81, 90])},
+                    "b": {"sockets": plugged(&[10, 11, 21, 31, 41, 0, 60, 70, 80, 91])}
+                }},
+                "reusablePlugs": {"data": {}}
+            }
+        }))
+        .unwrap();
+        let defs: HashMap<WeaponHash, WeaponDef> = [(def.hash, def)].into_iter().collect();
+        let out = read_profile(&profile, &defs, &enhanced());
+        let by_id: HashMap<&str, &WeaponCopy> = out.copies.iter().map(|c| (c.instance_id.as_str(), c)).collect();
+        let parts = |id: &str| by_id[id].parts.iter().map(|p| (p.kind, p.plugged.map(|h| h.0))).collect::<Vec<_>>();
+        assert_eq!(
+            parts("a"),
+            vec![
+                (PartKind::Intrinsic, Some(10)),
+                (PartKind::Origin, Some(60)),
+                (PartKind::Mod, Some(81)),
+                (PartKind::Masterwork, Some(90))
+            ]
+        );
+        assert_eq!(parts("b")[2], (PartKind::Mod, None), "an empty mod socket reads as no mod");
+        assert_eq!(by_id["a"].parts[1].options, vec![PerkHash(60)]);
+    }
+
+    #[test]
+    fn bundled_extra_info_loads() {
+        let extra = ExtraInfo::bundled();
+        assert!(extra.seasons.len() > 1000 && !extra.watermarks.is_empty() && !extra.breakers.is_empty());
+        let item = |hash: u32, breaker_type: u8| RawItemDef { hash, breaker_type, ..Default::default() };
+        assert_eq!(extra.breaker(&item(1, 2)), 2, "the item's own breaker type wins");
+        let (hash, kind) = extra.breakers.iter().next().map(|(h, k)| (h.parse::<u32>().unwrap(), *k)).unwrap();
+        assert_ne!(extra.breaker(&item(hash, 0)), 0, "extended breaker {kind} maps to a champion");
+        assert!(is_adept("Fatebringer (Timelost)") && is_adept("Unforgiven (Adept)") && !is_adept("Adept Rifle"));
+    }
+
+    #[test]
+    fn catalog_reads_how_weapons_look() {
+        let (items, sets) = manifest();
+        let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
+        let hc = c.weapons.iter().find(|w| w.hash == WeaponHash(1000)).unwrap();
+        assert_eq!(
+            hc.look,
+            WeaponLook {
+                icon: "/icons/hc.jpg".into(),
+                watermark: "/icons/season.png".into(),
+                screenshot: "/screens/hc.jpg".into(),
+                slot: 2,
+                damage: 3,
+                ammo: 1,
+                rarity: 5,
+                source: "Last Wish raid".into(),
+                collectible: 900,
+                ..Default::default()
+            }
+        );
+        let exotic = c.weapons.iter().find(|w| w.hash == WeaponHash(3000)).expect("exotics are kept");
+        assert!(exotic.columns.is_empty());
+        assert_eq!((exotic.look.source.as_str(), exotic.look.collectible), ("", 0), "no Collections entry");
+        assert_eq!((exotic.look.slot, exotic.look.damage, exotic.look.ammo, exotic.look.rarity), (3, 2, 3, 6));
     }
 
     fn fixture() -> RawProfile {
@@ -541,7 +1099,42 @@ mod tests {
             type_name: String::new(),
             columns: vec![Barrel, Magazine, Trait, Trait],
             socket_indexes: vec![1, 2, 3, 4],
+            look: Default::default(),
+            pools: Vec::new(),
+            parts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn reads_stats_location_and_player_name() {
+        let profile: RawProfile = serde_json::from_value(serde_json::json!({
+            "profile": {"data": {"userInfo": {"displayName": "old", "bungieGlobalDisplayName": "NightOwl",
+                "bungieGlobalDisplayNameCode": 21}}},
+            "profileInventory": {"data": {"items": [{"itemHash": 1, "itemInstanceId": "a", "state": 0}]}},
+            "characterInventories": {"data": {"c1": {"items": [{"itemHash": 1, "itemInstanceId": "b"}]}}},
+            "characterEquipment": {"data": {"c1": {"items": [{"itemHash": 1, "itemInstanceId": "c"}]}}},
+            "itemComponents": {
+                "instances": {"data": {}},
+                "sockets": {"data": {"a": {"sockets": []}, "b": {"sockets": []}, "c": {"sockets": []}}},
+                "reusablePlugs": {"data": {}},
+                "stats": {"data": {"a": {"stats": {
+                    "4043523819": {"statHash": 4043523819u32, "value": 70},
+                    "3871231066": {"statHash": 3871231066u32, "value": 12}
+                }}}}
+            }
+        }))
+        .unwrap();
+        assert_eq!(profile.player_name().as_deref(), Some("NightOwl#0021"));
+        let fixed = WeaponDef { columns: vec![], socket_indexes: vec![], ..layout(1) };
+        let defs: HashMap<WeaponHash, WeaponDef> = [(WeaponHash(1), fixed)].into_iter().collect();
+        let out = read_profile(&profile, &defs, &enhanced());
+        let by_id: HashMap<&str, &WeaponCopy> = out.copies.iter().map(|c| (c.instance_id.as_str(), c)).collect();
+        assert_eq!(by_id["a"].location, CopyLocation::Vault);
+        assert_eq!(by_id["b"].location, CopyLocation::Inventory);
+        assert_eq!(by_id["c"].location, CopyLocation::Equipped);
+        assert_eq!(by_id["a"].stats.get(&4_043_523_819), Some(&70));
+        assert_eq!(by_id["a"].stats.get(&3_871_231_066), Some(&12));
+        assert!(by_id["b"].stats.is_empty(), "stats are optional");
     }
 
     #[test]
@@ -564,6 +1157,11 @@ mod tests {
         // Enhanced 2617553311 is stored as its normal version 1955165503.
         assert!(t4.columns[2].options.contains(&PerkHash(1_955_165_503)));
         assert!(!t4.columns[2].options.contains(&PerkHash(2_617_553_311)));
+        // The selected perk is recorded per column, as its normal version, and is one of the options.
+        for c in t4.columns.iter().chain(&by_id["6917529257805248292"].columns) {
+            let plugged = c.plugged.expect("every column has a selected perk");
+            assert!(c.options.contains(&plugged), "{c:?}");
+        }
 
         // Untiered legacy copy, locked.
         let legacy = by_id["6917529257805248292"];
