@@ -31,7 +31,23 @@ type Session = {
   vaultError: string | null;
   /** Every known perk by hash, with its icon and description. */
   perks: Record<number, Perk>;
+  /** Minutes between automatic syncs; 0 turns auto sync off. */
+  autoSync: number;
+  setAutoSync: (minutes: number) => void;
 };
+
+const AUTO_SYNC_KEY = "paraforge.autoSync";
+export const AUTO_SYNC_DEFAULT = 15;
+
+function readAutoSync(): number {
+  try {
+    const stored = localStorage.getItem(AUTO_SYNC_KEY);
+    const minutes = stored === null ? AUTO_SYNC_DEFAULT : Number(stored);
+    return Number.isFinite(minutes) && minutes >= 0 ? minutes : AUTO_SYNC_DEFAULT;
+  } catch {
+    return AUTO_SYNC_DEFAULT;
+  }
+}
 
 const SessionContext = createContext<Session | null>(null);
 
@@ -56,6 +72,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [perks, setPerks] = useState<Record<number, Perk>>({});
   const loadSeq = useRef(0);
+  const [autoSync, setAutoSyncState] = useState(readAutoSync);
+  // When the last sync was started (ms), so a failing auto sync waits a full interval before retrying.
+  const lastAttempt = useRef(0);
+  const [infoLoaded, setInfoLoaded] = useState(false);
 
   // Reload the vault for the current context after each sync; only the newest reply counts.
   useEffect(() => {
@@ -82,6 +102,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       (i) => {
         setInfo(i);
         setSyncedAt(i.synced_at);
+        setInfoLoaded(true);
       },
       (e) => setSyncError(String(e)),
     );
@@ -114,6 +135,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(async () => {
     if (running.current) return;
     running.current = true;
+    lastAttempt.current = Date.now();
     setSyncError(null);
     setSyncStep("Starting");
     try {
@@ -130,6 +152,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSyncStep(null);
     }
   }, []);
+
+  const setAutoSync = useCallback((minutes: number) => {
+    setAutoSyncState(minutes);
+    try {
+      localStorage.setItem(AUTO_SYNC_KEY, String(minutes));
+    } catch {
+      // Without storage the choice lasts until the app closes.
+    }
+  }, []);
+
+  // Auto sync: on launch when the last sync is older than the interval, then whenever it comes due.
+  // Checked every minute, so a sleeping PC catches up soon after it wakes.
+  const canSync = Boolean(auth?.signed_in) && infoLoaded;
+  useEffect(() => {
+    if (!canSync || autoSync <= 0) return;
+    const interval = autoSync * 60_000;
+    const check = () => {
+      const now = Date.now();
+      const syncedMs = (syncedAt ?? 0) * 1000;
+      if (now - syncedMs >= interval && now - lastAttempt.current >= interval) void sync();
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    return () => window.clearInterval(timer);
+  }, [canSync, autoSync, syncedAt, sync]);
 
   const value: Session = {
     info,
@@ -151,6 +198,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     vault: loaded && loaded.context === context ? loaded.rows : null,
     vaultError,
     perks,
+    autoSync,
+    setAutoSync,
   };
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

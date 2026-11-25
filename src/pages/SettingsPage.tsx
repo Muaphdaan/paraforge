@@ -6,7 +6,7 @@ import { KeyRound, LogIn, LogOut, RefreshCw } from "lucide-react";
 import type { AuthStatus } from "../app/api";
 import { useSession } from "../app/session";
 import { timeAgo, useNow } from "../app/time";
-import { Banner } from "../ui/parts";
+import { Banner, Dropdown } from "../ui/parts";
 
 export function SettingsPage() {
   return (
@@ -167,6 +167,14 @@ function KeysCard() {
   );
 }
 
+const AUTO_SYNC_OPTIONS = [
+  { value: "0", label: "Auto sync off" },
+  { value: "5", label: "Every 5 minutes" },
+  { value: "15", label: "Every 15 minutes" },
+  { value: "30", label: "Every 30 minutes" },
+  { value: "60", label: "Every hour" },
+];
+
 function SyncCard() {
   const session = useSession();
   const now = useNow();
@@ -203,7 +211,18 @@ function SyncCard() {
           <RefreshCw size={16} className={syncing ? "pf-spin" : undefined} aria-hidden="true" />
           {syncing ? "Syncing..." : "Sync now"}
         </button>
+        <Dropdown
+          label="Auto sync"
+          value={String(session.autoSync)}
+          options={AUTO_SYNC_OPTIONS}
+          onChange={(v) => session.setAutoSync(Number(v))}
+        />
       </div>
+      <p className="pf-muted">
+        {session.autoSync > 0
+          ? "ParaForge also syncs when it starts and on this schedule while it is open."
+          : "Auto sync is off. Use Sync now to refresh your vault."}
+      </p>
     </section>
   );
 }
