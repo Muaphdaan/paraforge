@@ -8,14 +8,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   core:
     name: Core and Bungie tests
     runs-on: ubuntu-latest
+    # A newer push replaces an older run's tests and build; publishing is never cut off halfway.
+    concurrency:
+      group: ci-core-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,6 +29,10 @@ jobs:
   windows:
     name: Windows app build and test installer
     runs-on: windows-latest
+    # A newer push replaces an older run's tests and build; publishing is never cut off halfway.
+    concurrency:
+      group: ci-windows-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -55,15 +59,17 @@ jobs:
           retention-days: 14
 
   # Publishes the test build as the rolling "test-build" release, where installed copies of
-  # ParaForge look for updates (latest.json: version, installer address, SHA-256). Skipped for pull
-  # requests from forks.
+  # ParaForge look for updates (latest.json: version, installer address, SHA-256). Only main and the
+  # interface branch Jinx tests are published; other pull requests never reach installed copies.
   publish:
     name: Publish test build for in-app updates
-    needs: windows
+    needs: [core, windows]
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'feat/interface-shell')
     permissions:
       contents: write
     concurrency:
@@ -93,7 +99,9 @@ jobs:
               --title "ParaForge test build" --notes "Rolling test build. ParaForge installs updates from here by itself."
           fi
           # A later run may have published a newer build already; never go backwards.
-          current=$( (gh release download test-build --repo "$REPO" --pattern latest.json --output - 2>/dev/null || true) | jq -r '.version // "0.1.0"' 2>/dev/null || echo 0.1.0)
+          old=$( (gh release download test-build --repo "$REPO" --pattern latest.json --output - 2>/dev/null || true) )
+          current=$(printf '%s' "$old" | jq -r '.version // "0.1.0"' 2>/dev/null || echo 0.1.0)
+          previous=$(printf '%s' "$old" | jq -r '.url // ""' 2>/dev/null | sed 's#.*/##' || true)
           if [ "${current##*.}" -ge "${VERSION##*.}" ] 2>/dev/null; then
             echo "Release already has $current; skipping $VERSION."
             exit 0
@@ -101,7 +109,10 @@ jobs:
           # Installer first, then latest.json, so the manifest never points at a missing file.
           gh release upload test-build --repo "$REPO" --clobber "$exe"
           gh release upload test-build --repo "$REPO" --clobber build/latest.json
+          # Older installers go, except the one the previous manifest named: a copy of ParaForge
+          # that read it a moment ago may still be downloading it.
           gh release view test-build --repo "$REPO" --json assets --jq '.assets[].name' \
-            | { grep -E '\.exe$' || true; } | { grep -vxF "$name" || true; } | while read -r old; do
-              gh release delete-asset test-build "$old" --repo "$REPO" --yes
+            | { grep -E '\.exe$' || true; } | { grep -vxF -e "$name" -e "${previous:-none}" || true; } \
+            | while read -r stale; do
+              gh release delete-asset test-build "$stale" --repo "$REPO" --yes
             done

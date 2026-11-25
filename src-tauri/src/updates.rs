@@ -154,11 +154,14 @@ pub async fn update_check(app: AppHandle, state: State<'_, UpdateState>) -> Resu
 /// installer starts ParaForge again when it is done.
 #[tauri::command]
 pub fn update_install(app: AppHandle, state: State<'_, UpdateState>) -> Result<(), String> {
-    let ready = state.ready.lock().map_err(|e| e.to_string())?.clone();
-    let (_, path) = ready.ok_or("No update has been downloaded yet.")?;
+    let mut ready = state.ready.lock().map_err(|e| e.to_string())?;
+    let (_, path) = ready.clone().ok_or("No update has been downloaded yet.")?;
     if !path.exists() {
-        return Err("The downloaded update is gone. Check for updates again.".into());
+        // Download it again on the next check.
+        *ready = None;
+        return Err("the downloaded update is gone (an antivirus may have removed it)".into());
     }
+    drop(ready);
     #[cfg(windows)]
     {
         std::process::Command::new(&path)

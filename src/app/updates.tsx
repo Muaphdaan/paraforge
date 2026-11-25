@@ -37,6 +37,7 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const ready = useRef<{ version: string } | null>(null);
   const busy = useRef(false);
+  const checkRef = useRef<(manual?: boolean) => Promise<void>>(async () => {});
 
   const restart = useCallback(async () => {
     const update = ready.current;
@@ -46,42 +47,48 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       // The installer closes ParaForge, updates it, and opens it again.
       await invoke("update_install");
     } catch (e) {
-      setState({ status: "ready", version: update.version });
-      toast({ tone: "error", text: `The update could not be installed: ${String(e)}` });
+      // Download it again on the next check (the file may have been removed or quarantined).
+      ready.current = null;
+      setState({ status: "error", error: String(e) });
+      toast({
+        tone: "error",
+        text: `The update could not be installed: ${String(e)}`,
+        action: { label: "Try again", run: () => void checkRef.current(true) },
+      });
     }
   }, [toast]);
 
   const checkNow = useCallback(
     async (manual = false) => {
-      if (busy.current) return;
-      if (ready.current) {
-        if (manual) {
-          toast({
-            tone: "info",
-            text: `ParaForge ${ready.current.version} is ready to install.`,
-            action: { label: "Restart", run: () => void restart() },
-          });
-        }
+      if (busy.current) {
+        if (manual) toast({ tone: "info", text: "ParaForge is already checking for updates." });
         return;
       }
       busy.current = true;
+      const before = ready.current;
       setState({ status: "checking" });
       try {
+        // Also with a build ready: a newer one may have come out since, and the Rust side reuses
+        // the download when it is still the latest.
         const update = await invoke<{ version: string } | null>("update_check");
         if (!update) {
+          ready.current = null;
           setState({ status: "current" });
           if (manual) toast({ tone: "success", text: "You have the latest ParaForge." });
           return;
         }
         ready.current = update;
         setState({ status: "ready", version: update.version });
-        toast({
-          tone: "info",
-          text: `ParaForge ${update.version} is ready. Restart to update.`,
-          action: { label: "Restart", run: () => void restart() },
-        });
+        if (manual || before?.version !== update.version) {
+          toast({
+            tone: "info",
+            text: `ParaForge ${update.version} is ready. Restart to update.`,
+            action: { label: "Restart", run: () => void restart() },
+          });
+        }
       } catch (e) {
-        setState({ status: "error", error: String(e) });
+        // A build already downloaded stays ready when a later check fails.
+        setState(before ? { status: "ready", version: before.version } : { status: "error", error: String(e) });
         // An automatic check that fails (offline, GitHub busy) stays quiet and tries again later.
         if (manual) toast({ tone: "error", text: `Could not check for updates: ${String(e)}` });
       } finally {
@@ -90,6 +97,8 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
     },
     [toast, restart],
   );
+
+  checkRef.current = checkNow;
 
   useEffect(() => {
     const first = window.setTimeout(() => void checkNow(false), FIRST_CHECK_MS);

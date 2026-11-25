@@ -473,8 +473,8 @@ function AboutCard() {
           <button
             type="button"
             className="pf-btn"
-            disabled={status === "checking" || status === "installing"}
-            onClick={() => void updates.checkNow(true)}
+            aria-disabled={status === "checking" || status === "installing" || undefined}
+            onClick={() => status !== "checking" && status !== "installing" && void updates.checkNow(true)}
           >
             Check for updates
           </button>
