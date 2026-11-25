@@ -1,6 +1,6 @@
 // The Vault: every owned copy as a weapon tile (or a row), organised by slot and weapon type,
 // with search, verdict filters, grouping, sorting and a detail panel for the selected copy.
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { LayoutGrid, List, Search, X } from "lucide-react";
 import { Perk, SLOTS, Verdict, VaultRow } from "../app/api";
 import { PageId } from "../app/pages";
@@ -126,14 +126,6 @@ export function VaultPage({
   }, [prefs]);
 
   const rows = session.vault;
-  // Opened from a Home tile: bring that weapon into view once the vault is on screen.
-  const hasRows = Boolean(rows?.length);
-  useEffect(() => {
-    if (!initialSelectedId || !hasRows) return;
-    document
-      .querySelector(`.pf-vault__scroll [data-instance="${CSS.escape(initialSelectedId)}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [initialSelectedId, hasRows]);
   const words = useMemo(() => query.toLowerCase().split(/\s+/).filter(Boolean), [query]);
   const searched = useMemo(
     () => (rows ?? []).filter((r) => matches(r, words, session.perks)),
@@ -149,6 +141,23 @@ export function VaultPage({
     [searched, verdict],
   );
   const sections = useMemo(() => organise([...visible], prefs.group, prefs.sort), [visible, prefs.group, prefs.sort]);
+
+  // Opened with a weapon to select (Home tile, Back from a weapon page): clear kept filters that
+  // would hide it, then bring it into view, once per visit.
+  const revealed = useRef(false);
+  useEffect(() => {
+    if (revealed.current || !initialSelectedId || !rows?.length) return;
+    if (!rows.some((r) => r.instance_id === initialSelectedId)) return;
+    if (!visible.some((r) => r.instance_id === initialSelectedId)) {
+      setQuery("");
+      setVerdict("all");
+      return; // runs again with the unfiltered list
+    }
+    revealed.current = true;
+    document
+      .querySelector(`.pf-vault__scroll [data-instance="${CSS.escape(initialSelectedId)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [initialSelectedId, rows, visible]);
 
   const selected =
     (rows ?? []).find((r) => r.instance_id === selectedId) ?? sections[0]?.groups[0]?.rows[0] ?? null;

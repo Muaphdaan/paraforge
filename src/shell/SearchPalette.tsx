@@ -154,10 +154,16 @@ export function SearchPalette(props: {
           <kbd>Esc</kbd>
         </div>
         <ul className="pf-palette__list" role="listbox" id={listId} ref={list}>
-          {session.vault === null ? (
-            <li className="pf-palette__empty">Loading your vault...</li>
-          ) : items.length === 0 ? (
-            <li className="pf-palette__empty">{query ? "No weapon matches that." : "Your vault is empty. Sync first."}</li>
+          {items.length === 0 ? (
+            <li className="pf-palette__empty">
+              {session.vault === null
+                ? session.vaultError
+                  ? "Your vault could not be read."
+                  : "Loading your vault..."
+                : query
+                  ? "No weapon matches that."
+                  : "Your vault is empty. Sync first."}
+            </li>
           ) : (
             items.map((item, i) => {
               const first = item.kind === "codex" && items[i - 1]?.kind !== "codex";

@@ -60,6 +60,23 @@ export function ChasePage(props: {
     );
   }
 
+  if (session.vaultError && session.vault === null) {
+    return (
+      <EmptyState pose="confused" title="Your vault could not be read">
+        {session.vaultError}
+      </EmptyState>
+    );
+  }
+  if (codex.error) {
+    return (
+      <EmptyState pose="confused" title="The Codex could not be read">
+        {codex.error}
+      </EmptyState>
+    );
+  }
+  // Both are needed to say how close each roll is; until then nothing is better than a wrong answer.
+  if (session.vault === null || codex.rows === null) return null;
+
   const got = lines.filter((l) => l.closest && l.closest.matched === l.closest.wanted).length;
 
   async function remove(id: number) {
@@ -139,12 +156,18 @@ function ChaseLine(props: {
             <div key={i} className="pf-chaseline__col">
               <span className="pf-perkcol__label">{weapon ? (ROLE_LABELS[weapon.roles[i]] ?? "Perk") : "Perk"}</span>
               <span className="pf-chaseline__picks">
-                {want.map((h) => (
-                  <span key={h} className="pf-chaseline__pick" data-have={haveIn(closest?.copy, i, h) || undefined}>
-                    <PerkIcon hash={h} perk={props.perks[h]} size={26} />
-                    {props.perks[h]?.name ?? "Unknown perk"}
-                  </span>
-                ))}
+                {want.map((h) => {
+                  const have = haveIn(closest?.copy, i, h);
+                  return (
+                    <span key={h} className="pf-chaseline__pick" data-have={have || undefined}>
+                      <PerkIcon hash={h} perk={props.perks[h]} size={26} decorative />
+                      {props.perks[h]?.name ?? "Unknown perk"}
+                      {closest && !done && (
+                        <span className="pf-visually-hidden">{have ? " (on your closest copy)" : " (missing)"}</span>
+                      )}
+                    </span>
+                  );
+                })}
               </span>
             </div>
           ),

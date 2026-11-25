@@ -83,8 +83,12 @@ function AccountCard() {
   const [message, setMessage] = useState<string | null>(null);
   const signedIn = Boolean(auth?.signed_in);
   // The stored name is from the last sync; another account signed in since then shows its id instead.
+  // A name stored by an older version has no account id: it can only be the one that synced it.
+  const info = session.info;
   const ownName =
-    session.info?.player && session.info.player_membership_id === auth?.membership_id ? session.info.player : null;
+    info?.player && (info.player_membership_id == null || info.player_membership_id === auth?.membership_id)
+      ? info.player
+      : null;
   const name = ownName ?? (auth?.membership_id ? `Bungie.net member ${auth.membership_id}` : "Guardian");
   const startSignIn = () => {
     setMessage(null);

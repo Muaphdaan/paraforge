@@ -214,6 +214,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (auto) autoFailures.current += 1;
       setSyncError(String(e));
       setSyncErrorAuto(auto);
+      // A sync can store a new item database before a later step fails, so lists read again.
+      setDataVersion((v) => v + 1);
       // A refused sign-in shows up here first; refresh the status so the banner is right.
       invoke<AuthStatus>("auth_status").then(setAuth, () => {});
     } finally {

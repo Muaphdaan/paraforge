@@ -49,23 +49,25 @@ export function WeaponPage(props: { instanceId: string; onSelect: (instanceId: s
   const session = useSession();
   const rows = session.vault;
   const row = rows?.find((r) => r.instance_id === props.instanceId) ?? null;
-  // undefined while it loads; null when there is none or it could not be read.
-  const [def, setDef] = useState<WeaponDef | null | undefined>(undefined);
+  // undefined while this weapon's definition loads; null when there is none or it could not be read.
+  // A reload after a sync keeps showing the last one until the new one arrives.
+  const [loadedDef, setLoadedDef] = useState<{ hash: number; def: WeaponDef | null } | null>(null);
   const scores = useScoresByContext(session.dataVersion);
   const weaponHash = row?.weapon;
 
   useEffect(() => {
     if (weaponHash === undefined) return;
     let live = true;
-    setDef(undefined);
     invoke<WeaponDef | null>("weapon", { hash: weaponHash }).then(
-      (d) => live && setDef(d ?? null),
-      () => live && setDef(null),
+      (d) => live && setLoadedDef({ hash: weaponHash, def: d ?? null }),
+      () => live && setLoadedDef({ hash: weaponHash, def: null }),
     );
     return () => {
       live = false;
     };
   }, [weaponHash, session.dataVersion]);
+
+  const def = weaponHash !== undefined && loadedDef?.hash === weaponHash ? loadedDef.def : undefined;
 
   const copies = useMemo(
     () =>

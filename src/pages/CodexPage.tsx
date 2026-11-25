@@ -26,6 +26,17 @@ function readPrefs(): { group: GroupBy; rarity: Rarity } {
   }
 }
 
+// Search, filter, selection and perk picks survive leaving the Codex (for a weapon page, say) until
+// the app closes.
+const kept: {
+  query: string;
+  owned: Owned;
+  selectedHash: number | null;
+  picks: { hash: number; picks: number[][] } | null;
+  /** The last open request handled, so coming Back to the Codex keeps the selection made since. */
+  focusToken: number | undefined;
+} = { query: "", owned: "all", selectedHash: null, picks: null, focusToken: undefined };
+
 type Group = { key: string; title: string | null; rows: CodexRow[] };
 type Section = { key: string; title: string; groups: Group[] };
 
@@ -70,13 +81,23 @@ function haystack(row: CodexRow, perks: Record<number, Perk>): string {
     .toLowerCase();
 }
 
-export function CodexPage(props: { initialHash?: number | null; onOpenWeapon: (instanceId: string) => void }) {
+export function CodexPage(props: {
+  initialHash?: number | null;
+  /** Changes on every request to open a weapon, so opening the same one again still selects it. */
+  focusToken?: number;
+  onOpenWeapon: (instanceId: string) => void;
+}) {
   const session = useSession();
   const codex = useCodex();
   const [prefs, setPrefs] = useState(readPrefs);
-  const [query, setQuery] = useState("");
-  const [owned, setOwned] = useState<Owned>("all");
-  const [selectedHash, setSelectedHash] = useState<number | null>(props.initialHash ?? null);
+  const [query, setQuery] = useState(kept.query);
+  const [owned, setOwned] = useState<Owned>(kept.owned);
+  const [selectedHash, setSelectedHash] = useState<number | null>(props.initialHash ?? kept.selectedHash);
+  useEffect(() => {
+    kept.query = query;
+    kept.owned = owned;
+    kept.selectedHash = selectedHash;
+  }, [query, owned, selectedHash]);
   const searchId = useId();
 
   useEffect(() => {
@@ -87,15 +108,16 @@ export function CodexPage(props: { initialHash?: number | null; onOpenWeapon: (i
     }
   }, [prefs]);
 
-  // Opened on a weapon (from search): select it and bring it into view.
+  // Opened on a weapon (search, Collections, Chase list): select it, clear any filter that would
+  // hide its tile, then bring the tile into view. Runs once per request, not on every sync.
+  const byHash = codex.byHash;
+  const [reveal, setReveal] = useState<number | null>(null);
   useEffect(() => {
-    if (props.initialHash) setSelectedHash(props.initialHash);
-  }, [props.initialHash]);
-  const hasRows = Boolean(codex.rows?.length);
-  useEffect(() => {
-    if (!props.initialHash || !hasRows) return;
-    document.querySelector(`.pf-vault__scroll [data-hash="${props.initialHash}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [props.initialHash, hasRows]);
+    if (!props.initialHash || kept.focusToken === props.focusToken) return;
+    kept.focusToken = props.focusToken;
+    setSelectedHash(props.initialHash);
+    setReveal(props.initialHash);
+  }, [props.initialHash, props.focusToken]);
 
   const indexed = useMemo(
     () => (codex.rows ?? []).map((row) => ({ row, text: haystack(row, session.perks) })),
@@ -118,6 +140,21 @@ export function CodexPage(props: { initialHash?: number | null; onOpenWeapon: (i
     [searched, owned],
   );
   const sections = useMemo(() => organise(visible, prefs.group), [visible, prefs.group]);
+  useEffect(() => {
+    if (reveal === null) return;
+    const tile = document.querySelector(`.pf-vault__scroll [data-hash="${reveal}"]`);
+    if (tile) {
+      tile.scrollIntoView({ block: "nearest" });
+      setReveal(null);
+      return;
+    }
+    const row = byHash.get(reveal);
+    if (!row) return; // the Codex is still loading
+    // Hidden by a filter: clear them, and this runs again with the tile on screen.
+    setQuery("");
+    setOwned("all");
+    setPrefs((p) => (p.rarity === "all" || String(row.look.rarity) === p.rarity ? p : { ...p, rarity: "all" }));
+  }, [reveal, sections, byHash]);
 
   const selected =
     (selectedHash !== null ? codex.byHash.get(selectedHash) : undefined) ?? sections[0]?.groups[0]?.rows[0] ?? null;
@@ -328,7 +365,14 @@ function CodexDetail(props: {
   const { row, perks, copies } = props;
   const chase = useChase();
   const exotic = row.look.rarity === 6;
-  const [picks, setPicks] = useState<number[][]>(() => row.pools.map(() => []));
+  const [rawPicks, setPicks] = useState<number[][]>(() =>
+    kept.picks?.hash === row.hash ? kept.picks.picks : row.pools.map(() => []),
+  );
+  // Matched to the current pools on every render: a sync can change them under an open panel.
+  const picks = row.pools.map((pool, i) => (rawPicks[i] ?? []).filter((h) => pool.includes(h)));
+  useEffect(() => {
+    kept.picks = { hash: row.hash, picks: rawPicks };
+  }, [row.hash, rawPicks]);
   const [status, setStatus] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const picked = picks.some((c) => c.length > 0);
@@ -337,7 +381,7 @@ function CodexDetail(props: {
 
   function toggle(column: number, hash: number) {
     setStatus(null);
-    setPicks((p) => p.map((c, i) => (i !== column ? c : c.includes(hash) ? c.filter((h) => h !== hash) : [...c, hash])));
+    setPicks(picks.map((c, i) => (i !== column ? c : c.includes(hash) ? c.filter((h) => h !== hash) : [...c, hash])));
   }
 
   async function chaseIt() {
@@ -425,7 +469,7 @@ function CodexDetail(props: {
                         aria-pressed={picks[i]?.includes(hash)}
                         onClick={() => toggle(i, hash)}
                       >
-                        <PerkIcon hash={hash} perk={perks[hash]} size={30} />
+                        <PerkIcon hash={hash} perk={perks[hash]} size={30} decorative />
                         <span className="pf-perkrow__name">{perks[hash]?.name ?? "Unknown perk"}</span>
                         {picks[i]?.includes(hash) && <Check size={16} strokeWidth={3} className="pf-perkpick__check" aria-hidden="true" />}
                       </button>

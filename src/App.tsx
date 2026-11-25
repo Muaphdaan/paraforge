@@ -70,7 +70,14 @@ function Shell() {
     },
     [push],
   );
-  const openInCodex = useCallback((hash: number) => push({ page: "codex", weapon: String(hash) }), [push]);
+  const [codexFocus, setCodexFocus] = useState(0);
+  const openInCodex = useCallback(
+    (hash: number) => {
+      setCodexFocus((n) => n + 1);
+      push({ page: "codex", weapon: String(hash) });
+    },
+    [push],
+  );
   // Switching copies on a weapon page replaces it, so Back still leads out of the weapon.
   const switchCopy = useCallback(
     (instanceId: string) => {
@@ -156,7 +163,11 @@ function Shell() {
                 <WeaponPage key={route.weapon} instanceId={route.weapon} onSelect={switchCopy} />
               )}
               {page === "codex" && (
-                <CodexPage initialHash={route.weapon ? Number(route.weapon) : null} onOpenWeapon={openWeaponPage} />
+                <CodexPage
+                  initialHash={route.weapon ? Number(route.weapon) : null}
+                  focusToken={codexFocus}
+                  onOpenWeapon={openWeaponPage}
+                />
               )}
               {page === "chase" && (
                 <ChasePage onNavigate={navigate} onOpenInCodex={openInCodex} onOpenWeapon={openWeaponPage} />

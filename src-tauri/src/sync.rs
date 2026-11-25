@@ -89,10 +89,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let _guard = RunningGuard(&sync.running);
 
     progress(&app, "Checking your Bungie sign-in");
-    let (keys, signed_in) = auth::access_token(&app.state::<AuthState>()).await?;
-    // Settings shows the stored Bungie Name only while the same account is signed in.
-    let membership_id = signed_in.membership_id.clone();
-    drop(signed_in);
+    let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
     let api = BungieApi::new(&keys).map_err(api_err)?;
 
     // 1. Item definitions, downloaded again only when Bungie publishes a new manifest.
@@ -164,7 +161,9 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
 
     // 2. The player's weapons.
     progress(&app, "Reading your vault and characters");
-    let profile = read_player(&app, &api).await?;
+    // The membership whose profile was read: Settings shows the stored Bungie Name only while the
+    // same account is signed in.
+    let (profile, membership_id) = read_player(&app, &api).await?;
     let missing = profile.missing_parts();
     if !missing.is_empty() {
         // Storing a partial profile would look like deleted weapons, so keep the last good sync.
@@ -213,17 +212,19 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     })
 }
 
-/// Fetches the player's profile. The access token is fetched again here because the manifest
-/// download can outlast it; if Bungie still rejects it, it is refreshed once and the call retried.
-async fn read_player(app: &AppHandle, api: &BungieApi) -> Result<RawProfile, String> {
+/// Fetches the player's profile and the membership it belongs to. The access token is fetched again
+/// here because the manifest download can outlast it; if Bungie still rejects it, it is refreshed
+/// once and the call retried.
+async fn read_player(app: &AppHandle, api: &BungieApi) -> Result<(RawProfile, String), String> {
     let auth_state = app.state::<AuthState>();
     let (_, tokens) = auth::access_token(&auth_state).await?;
     match profile_for(api, &tokens).await {
         Err(ApiError::SignInRequired) => {
             let (_, fresh) = auth::refresh_after_rejection(&auth_state, &tokens).await?;
-            profile_for(api, &fresh).await.map_err(api_err)
+            let profile = profile_for(api, &fresh).await.map_err(api_err)?;
+            Ok((profile, fresh.membership_id.clone()))
         }
-        other => other.map_err(api_err),
+        other => other.map(|p| (p, tokens.membership_id.clone())).map_err(api_err),
     }
 }
 

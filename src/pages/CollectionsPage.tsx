@@ -35,15 +35,20 @@ export function CollectionsPage(props: { onOpenInCodex: (hash: number) => void }
   const [selected, setSelected] = useState<string | null>(null);
 
   const sources = useMemo<Source[]>(() => {
+    const all = codex.rows ?? [];
+    // A name owned in any version counts as owned in every source that has a version of it.
+    const best = new Map(distinct(all).map((r) => [r.name, r] as const));
     const groups = new Map<string, CodexRow[]>();
-    for (const r of codex.rows ?? []) {
+    for (const r of all) {
       const key = r.look.source || UNKNOWN;
       const list = groups.get(key);
       if (list) list.push(r);
       else groups.set(key, [r]);
     }
     return [...groups.entries()].map(([name, rows]) => {
-      const weapons = distinct(rows).sort((a, b) => Number(b.owned > 0) - Number(a.owned > 0) || a.name.localeCompare(b.name));
+      const weapons = distinct(rows)
+        .map((r) => (r.owned > 0 ? r : (best.get(r.name) ?? r)))
+        .sort((a, b) => Number(b.owned > 0) - Number(a.owned > 0) || a.name.localeCompare(b.name));
       return { name, weapons, owned: weapons.filter((w) => w.owned > 0).length };
     });
   }, [codex.rows]);
@@ -123,39 +128,59 @@ export function CollectionsPage(props: { onOpenInCodex: (hash: number) => void }
           </div>
         </div>
         {noSources && <p className="pf-muted">Sources come in with your next sync.</p>}
-        <ul className="pf-sources" role="listbox" aria-label="Sources">
-          {shown.map((s) => {
-            const done = s.owned === s.weapons.length;
-            return (
-              <li
-                key={s.name}
-                role="option"
-                aria-selected={current?.name === s.name}
-                tabIndex={0}
-                className="pf-source"
-                data-done={done || undefined}
-                onClick={() => setSelected(s.name)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelected(s.name);
-                  }
-                }}
-              >
-                <span className="pf-source__name">
-                  {done && <Check size={14} strokeWidth={3} aria-hidden="true" />}
-                  {s.name}
-                </span>
-                <span className="pf-source__count">
-                  {s.owned}/{s.weapons.length}
-                </span>
-                <span className="pf-source__bar" aria-hidden="true">
-                  <span style={{ width: `${percent(s.owned, s.weapons.length)}%` }} />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        {shown.length > 0 && (
+          <ul
+            className="pf-sources"
+            role="listbox"
+            aria-label="Sources"
+            onKeyDown={(e) => {
+              // One Tab stop for the list; the arrow keys, Home and End move the selection.
+              const i = shown.findIndex((s) => s.name === current?.name);
+              const last = shown.length - 1;
+              const next =
+                e.key === "ArrowDown"
+                  ? Math.min(i + 1, last)
+                  : e.key === "ArrowUp"
+                    ? Math.max(i - 1, 0)
+                    : e.key === "Home"
+                      ? 0
+                      : e.key === "End"
+                        ? last
+                        : -1;
+              if (next < 0) return;
+              e.preventDefault();
+              setSelected(shown[next].name);
+              (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
+            }}
+          >
+            {shown.map((s) => {
+              const done = s.owned === s.weapons.length;
+              const isCurrent = current?.name === s.name;
+              return (
+                <li
+                  key={s.name}
+                  role="option"
+                  aria-selected={isCurrent}
+                  tabIndex={isCurrent ? 0 : -1}
+                  className="pf-source"
+                  data-done={done || undefined}
+                  onClick={() => setSelected(s.name)}
+                >
+                  <span className="pf-source__name">
+                    {done && <Check size={14} strokeWidth={3} aria-hidden="true" />}
+                    {s.name}
+                  </span>
+                  <span className="pf-source__count">
+                    {s.owned}/{s.weapons.length}
+                  </span>
+                  <span className="pf-source__bar" aria-hidden="true">
+                    <span style={{ width: `${percent(s.owned, s.weapons.length)}%` }} />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         {shown.length === 0 && <p className="pf-muted">Every source is complete. Well done, Guardian.</p>}
       </section>
 

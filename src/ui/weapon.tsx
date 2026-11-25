@@ -123,7 +123,14 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
 }
 
 /** A perk as a round icon, with its name and description on hover. */
-export function PerkIcon(props: { perk: Perk | undefined; hash: number; enhanced?: boolean; size?: number }) {
+/** `decorative` hides it from screen readers where the perk's name is already shown as text. */
+export function PerkIcon(props: {
+  perk: Perk | undefined;
+  hash: number;
+  enhanced?: boolean;
+  size?: number;
+  decorative?: boolean;
+}) {
   const size = props.size ?? 32;
   const name = props.perk?.name ?? `Perk ${props.hash}`;
   const title = props.perk?.description ? `${name}${props.enhanced ? " (enhanced)" : ""}\n${props.perk.description}` : name;
@@ -133,8 +140,7 @@ export function PerkIcon(props: { perk: Perk | undefined; hash: number; enhanced
       data-enhanced={props.enhanced || undefined}
       style={{ width: size, height: size }}
       title={title}
-      aria-label={name}
-      role="img"
+      {...(props.decorative ? { "aria-hidden": true } : { role: "img", "aria-label": name })}
     >
       {props.perk?.icon ? <BungieImage path={props.perk.icon} className="pf-perk__icon" /> : null}
     </span>
