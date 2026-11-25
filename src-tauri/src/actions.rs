@@ -68,9 +68,8 @@ pub async fn equip_copy(
         return Err("ParaForge is already moving a weapon. Wait for it to finish.".into());
     }
     let _guard = RunningGuard(&sync.acting);
-    if sync.running.load(Ordering::SeqCst) {
-        return Err("A sync is running. Try again when it finishes.".into());
-    }
+    // A sync reading the profile right now finishes that read first (a second or two).
+    let _gate = sync.gate.lock().await;
 
     let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
     let api = BungieApi::new(&keys).map_err(api_err).map_err(sentence)?;

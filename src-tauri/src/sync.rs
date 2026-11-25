@@ -45,6 +45,9 @@ pub struct SyncState {
     pub(crate) running: AtomicBool,
     /// An item action (move, equip, perk switch) is running.
     pub(crate) acting: AtomicBool,
+    /// Held by an item action for its whole run, and by a sync while it reads the profile, so a sync
+    /// never stores a weapon's place halfway through a move. Each waits for the other.
+    pub(crate) gate: tokio::sync::Mutex<()>,
 }
 
 pub(crate) struct RunningGuard<'a>(pub(crate) &'a AtomicBool);
@@ -108,10 +111,6 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         return Err("A sync is already running.".into());
     }
     let _guard = RunningGuard(&sync.running);
-    // A sync during a move would read the weapon halfway; the equip asks for a sync when it ends.
-    if sync.acting.load(Ordering::SeqCst) {
-        return Err("ParaForge is moving a weapon. Sync again once it is done.".into());
-    }
 
     progress(&app, "Checking your Bungie sign-in");
     let (keys, _) = auth::access_token(&app.state::<AuthState>()).await?;
@@ -197,7 +196,11 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     progress(&app, "Reading your vault and characters");
     // The membership whose profile was read: Settings shows the stored Bungie Name only while the
     // same account is signed in.
-    let (profile, tokens, _) = read_player(&app, &api).await?;
+    let (profile, tokens, _) = {
+        // Waits for a weapon move to finish, so its halfway state is never stored.
+        let _gate = sync.gate.lock().await;
+        read_player(&app, &api).await?
+    };
     let membership_id = tokens.membership_id.clone();
     drop(tokens);
     let missing = profile.missing_parts();
