@@ -6,7 +6,7 @@ import { META_TIER_LABEL, META_TIER_ORDER, Perk, SLOTS, Verdict, VaultRow, byMet
 import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
 import { Dropdown, EmptyState, TierPill, VerdictPill } from "../ui/parts";
-import { BungieImage, ElementIcon, PerkIcon, WeaponTile } from "../ui/weapon";
+import { BungieImage, ElementIcon, PerkIcon, selectedFirst, WeaponTile } from "../ui/weapon";
 import { FilterButton, FilterPanel, NO_FILTERS, WeaponFilters, activeFilters, applyFilters } from "../ui/filters";
 import { WeaponDetail } from "./WeaponDetail";
 
@@ -445,9 +445,19 @@ function WeaponRow(props: { row: VaultRow; perks: Record<number, Perk>; selected
       )}
       <span className="pf-wrow__perks">
         {row.columns.map((c, i) =>
-          c.options.slice(0, 2).map((h) => (
-            <PerkIcon key={`${i}-${h}`} hash={h} perk={props.perks[h]} enhanced={c.enhanced} size={26} />
-          )),
+          selectedFirst(c)
+            .slice(0, 2)
+            .map((h) => (
+              <span
+                key={`${i}-${h}`}
+                className="pf-wrow__perk"
+                data-selected={c.plugged === h || undefined}
+                data-dim={(c.plugged != null && c.plugged !== h) || undefined}
+              >
+                <PerkIcon hash={h} perk={props.perks[h]} enhanced={c.enhanced} size={26} />
+                {c.plugged === h && c.options.length > 1 && <span className="pf-visually-hidden">(active)</span>}
+              </span>
+            )),
         )}
       </span>
       <span className={`pf-wrow__score pf-v--${row.score?.verdict ?? "none"}`}>

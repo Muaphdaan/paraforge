@@ -9,7 +9,7 @@ import { timeAgo, useNow } from "../app/time";
 import { matchShare, rollMatch, useGodRolls } from "../ui/godrolls";
 import { EmptyState, TierPill, VerdictPill } from "../ui/parts";
 import { useConfirm, useToast } from "../ui/feedback";
-import { BungieImage, ElementIcon, MetaMark, PerkIcon } from "../ui/weapon";
+import { ActiveTag, BungieImage, ElementIcon, MetaMark, PerkIcon, selectedFirst } from "../ui/weapon";
 
 type Tab = "drops" | "dupes";
 
@@ -302,10 +302,13 @@ function DropCard(props: {
           {row.columns.map((c, i) => (
             <div key={i} className="pf-drop__col">
               <span className="pf-perkcol__label">{ROLE_LABELS[row.roles[i]] ?? "Perk"}</span>
-              {c.options.map((h) => (
-                <span key={h} className="pf-perkrow">
+              {selectedFirst(c).map((h) => (
+                <span key={h} className="pf-perkrow" data-selected={c.plugged === h || undefined}>
                   <PerkIcon hash={h} perk={session.perks[h]} enhanced={c.enhanced} size={28} decorative />
-                  <span className="pf-perkrow__name">{session.perks[h]?.name ?? "Unknown perk"}</span>
+                  <span className="pf-perkrow__name">
+                    {session.perks[h]?.name ?? "Unknown perk"}
+                    {c.plugged === h && c.options.length > 1 && <ActiveTag />}
+                  </span>
                 </span>
               ))}
             </div>

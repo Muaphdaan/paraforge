@@ -189,6 +189,10 @@
   background: var(--panel-solid);
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
   list-style: none;
+  /* Long lists (sources, seasons, frames) scroll instead of running off the window. */
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .pf-dropdown__option {

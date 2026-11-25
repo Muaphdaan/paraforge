@@ -179,6 +179,15 @@ pub struct WeaponLook {
     pub source: String,
     /// The hash of its Collections entry, 0 when it has none.
     pub collectible: u32,
+    /// The champion it stuns on its own (intrinsic or exotic perk, not the seasonal artifact):
+    /// 1 Barrier (shield-piercing), 2 Overload (disruption), 3 Unstoppable (stagger); 0 none.
+    pub breaker: u8,
+    /// Has a crafting pattern (can be crafted at the Enclave).
+    pub craftable: bool,
+    /// An Adept, Timelost or Harrowed version (the harder-activity variant).
+    pub adept: bool,
+    /// The season it came out in (Bungie's season number, 1 = Red War); 0 when unknown.
+    pub season: u8,
 }
 
 /// One column on an owned copy.
@@ -189,6 +198,9 @@ pub struct CopyColumn {
     /// Whether the perk in this column is the enhanced version.
     #[serde(default)]
     pub enhanced: bool,
+    /// The perk selected right now (base version), when Bungie said; one of `options`.
+    #[serde(default)]
+    pub plugged: Option<PerkHash>,
 }
 
 /// One copy of a weapon the player owns.

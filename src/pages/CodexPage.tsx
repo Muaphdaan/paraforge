@@ -4,7 +4,9 @@
 import { memo, useEffect, useId, useMemo, useState } from "react";
 import { ArrowRight, Check, Crosshair, MapPin, Search, X } from "lucide-react";
 import {
+  BREAKERS,
   CodexRow,
+  ELEMENTS,
   META_TIER_LABEL,
   META_TIER_ORDER,
   Perk,
@@ -17,6 +19,7 @@ import {
 } from "../app/api";
 import { sameRoll, useChase } from "../app/chase";
 import { useCodex } from "../app/codex";
+import { seasonLabel } from "../app/seasons";
 import { useSession } from "../app/session";
 import { FilterButton, FilterPanel, NO_FILTERS, WeaponFilters, activeFilters, applyFilters } from "../ui/filters";
 import { GodRolls } from "../ui/godrolls";
@@ -29,25 +32,53 @@ import {
   MetaMark,
   PartList,
   PerkIcon,
+  WeaponExtraChips,
   weaponParts,
 } from "../ui/weapon";
 
 type Owned = "all" | "owned" | "missing";
 type Rarity = "all" | "5" | "6";
-type GroupBy = "meta" | "slot" | "type" | "source";
+type GroupBy = "meta" | "slot" | "type" | "element" | "champion" | "season" | "source";
+type SortBy = "meta" | "name" | "newest" | "owned";
+type Prefs = { group: GroupBy; rarity: Rarity; sort: SortBy };
+
+const GROUPS: { value: GroupBy; label: string }[] = [
+  { value: "meta", label: "Meta first" },
+  { value: "slot", label: "By slot" },
+  { value: "type", label: "By weapon type" },
+  { value: "element", label: "By element" },
+  { value: "champion", label: "By champion" },
+  { value: "season", label: "By season" },
+  { value: "source", label: "By source" },
+];
+const SORTS: { value: SortBy; label: string }[] = [
+  { value: "meta", label: "Sort: meta picks" },
+  { value: "name", label: "Sort: name" },
+  { value: "newest", label: "Sort: newest" },
+  { value: "owned", label: "Sort: most owned" },
+];
 
 const SLOT_ORDER = [1, 2, 3, 0];
 // v2: meta first became the default grouping.
 const PREFS_KEY = "paraforge.codexPrefs.v2";
 
-function readPrefs(): { group: GroupBy; rarity: Rarity } {
-  const fallback = { group: "meta" as GroupBy, rarity: "all" as Rarity };
+/** Saved prefs, with anything unknown (an older or newer ParaForge) put back to the default. */
+function cleanPrefs(saved: Partial<Prefs>, fallback: Prefs): Prefs {
+  return {
+    group: GROUPS.some((g) => g.value === saved.group) ? saved.group! : fallback.group,
+    sort: SORTS.some((g) => g.value === saved.sort) ? saved.sort! : fallback.sort,
+    rarity: saved.rarity === "5" || saved.rarity === "6" || saved.rarity === "all" ? saved.rarity : fallback.rarity,
+  };
+}
+
+function readPrefs(): Prefs {
+  const fallback: Prefs = { group: "meta", rarity: "all", sort: "meta" };
   try {
     const saved = localStorage.getItem(PREFS_KEY);
-    if (saved) return { ...fallback, ...JSON.parse(saved) };
+    if (saved) return cleanPrefs(JSON.parse(saved), fallback);
     // Carry the rarity filter over from before meta first existed; only the grouping starts fresh.
     const { rarity } = JSON.parse(localStorage.getItem("paraforge.codexPrefs") ?? "{}");
-    return { ...fallback, ...(rarity ? { rarity } : {}) };
+    return cleanPrefs({ rarity }, fallback);
   } catch {
     return fallback;
   }
@@ -90,9 +121,29 @@ function byKey(rows: CodexRow[], key: (r: CodexRow) => string | number): Map<str
 
 const alpha = (a: string | number, b: string | number) => String(a).localeCompare(String(b));
 
-/** Rows arrive sorted by name; every group puts meta weapons first and keeps name order after that. */
-function organise(input: CodexRow[], group: GroupBy): Section[] {
-  const rows = [...input].sort(byMeta);
+/** Rows arrive sorted by name, and every sort keeps name order for ties (the sort is stable). */
+const SORT_FN: Record<SortBy, ((a: CodexRow, b: CodexRow) => number) | null> = {
+  meta: byMeta,
+  name: null,
+  newest: (a, b) => (b.look.season ?? 0) - (a.look.season ?? 0) || byMeta(a, b),
+  owned: (a, b) => b.owned - a.owned || byMeta(a, b),
+};
+
+const ELEMENT_ORDER = [1, 2, 3, 4, 6, 7];
+
+/** Sections of one level, each split by weapon type. */
+function withTypes(key: string, title: string, rows: CodexRow[]): Section {
+  const types = byKey(rows, (r) => r.type_name || "Other");
+  return {
+    key,
+    title,
+    groups: [...types.keys()].sort(alpha).map((t) => ({ key: String(t), title: String(t), rows: types.get(t)! })),
+  };
+}
+
+function organise(input: CodexRow[], group: GroupBy, sort: SortBy): Section[] {
+  const fn = SORT_FN[sort];
+  const rows = fn ? [...input].sort(fn) : input;
   if (group === "meta") {
     const tiers = byKey(rows, (r) => metaTier(r.meta));
     return META_TIER_ORDER.filter((t) => tiers.has(t)).map((t) => ({
@@ -103,14 +154,32 @@ function organise(input: CodexRow[], group: GroupBy): Section[] {
   }
   if (group === "slot") {
     const slots = byKey(rows, (r) => (SLOTS[r.look.slot] ? r.look.slot : 0));
-    return SLOT_ORDER.filter((s) => slots.has(s)).map((slot) => {
-      const types = byKey(slots.get(slot)!, (r) => r.type_name || "Other");
-      return {
-        key: `slot-${slot}`,
-        title: SLOTS[slot],
-        groups: [...types.keys()].sort(alpha).map((t) => ({ key: String(t), title: String(t), rows: types.get(t)! })),
-      };
-    });
+    return SLOT_ORDER.filter((s) => slots.has(s)).map((slot) => withTypes(`slot-${slot}`, SLOTS[slot], slots.get(slot)!));
+  }
+  if (group === "element") {
+    const els = byKey(rows, (r) => (ELEMENTS[r.look.damage] ? r.look.damage : 0));
+    return [...ELEMENT_ORDER, 0]
+      .filter((e) => els.has(e))
+      .map((e) => withTypes(`el-${e}`, ELEMENTS[e]?.name ?? "Other", els.get(e)!));
+  }
+  if (group === "champion") {
+    const kinds = byKey(rows, (r) => (BREAKERS[r.look.breaker ?? 0] ? r.look.breaker! : 0));
+    return [1, 2, 3, 0]
+      .filter((k) => kinds.has(k))
+      .map((k) =>
+        withTypes(`champ-${k}`, k ? `${BREAKERS[k]}` : "No champion stun of its own", kinds.get(k)!),
+      );
+  }
+  if (group === "season") {
+    const seasons = byKey(rows, (r) => r.look.season ?? 0);
+    return [...seasons.keys()]
+      .map(Number)
+      .sort((a, b) => (a === 0 ? 1 : b === 0 ? -1 : b - a))
+      .map((n) => ({
+        key: `season-${n}`,
+        title: n ? seasonLabel(n) : "Season not known",
+        groups: [{ key: String(n), title: null, rows: seasons.get(n)! }],
+      }));
   }
   const keyOf = group === "type" ? (r: CodexRow) => r.type_name || "Other" : (r: CodexRow) => r.look.source || "Unknown source";
   const groups = byKey(rows, keyOf);
@@ -119,10 +188,23 @@ function organise(input: CodexRow[], group: GroupBy): Section[] {
     .map((k) => ({ key: String(k), title: String(k), groups: [{ key: String(k), title: null, rows: groups.get(k)! }] }));
 }
 
-/** Everything a Codex search looks through, lower case: name, type, source and every perk it can roll. */
+/** Everything a Codex search looks through, lower case: name, type, source, slot, element, champion,
+ * season, craftable or adept, and every perk it can roll. */
 function haystack(row: CodexRow, perks: Record<number, Perk>): string {
   const perkNames = row.pools.flatMap((pool) => pool.map((h) => perks[h]?.name ?? ""));
-  return [row.name, row.type_name, row.look.source, row.look.rarity === 6 ? "exotic" : "legendary", ...perkNames]
+  return [
+    row.name,
+    row.type_name,
+    row.look.source,
+    row.look.rarity === 6 ? "exotic" : "legendary",
+    SLOTS[row.look.slot] ?? "",
+    ELEMENTS[row.look.damage]?.name ?? "",
+    row.look.breaker ? `${BREAKERS[row.look.breaker] ?? ""} champion` : "",
+    row.look.season ? seasonLabel(row.look.season) : "",
+    row.look.craftable ? "craftable" : "",
+    row.look.adept ? "adept" : "",
+    ...perkNames,
+  ]
     .join(" ")
     .toLowerCase();
 }
@@ -193,7 +275,7 @@ export function CodexPage(props: {
     () => (owned === "all" ? searched : searched.filter((r) => (owned === "owned" ? r.owned > 0 : r.owned === 0))),
     [searched, owned],
   );
-  const sections = useMemo(() => organise(visible, prefs.group), [visible, prefs.group]);
+  const sections = useMemo(() => organise(visible, prefs.group, prefs.sort), [visible, prefs.group, prefs.sort]);
   useEffect(() => {
     if (reveal === null) return;
     const tile = document.querySelector(`.pf-vault__scroll [data-hash="${reveal}"]`);
@@ -253,9 +335,9 @@ export function CodexPage(props: {
             <input
               id={searchId}
               type="search"
-              aria-label="Search by name, type, source or perk"
+              aria-label="Search by name, type, source, season, champion or perk"
               value={query}
-              placeholder="Search by name, type, source or perk"
+              placeholder="Search by name, type, source, season, champion or perk"
               onChange={(e) => setQuery(e.target.value)}
               spellCheck={false}
             />
@@ -279,14 +361,10 @@ export function CodexPage(props: {
           <Dropdown
             label="Group by"
             value={prefs.group}
-            options={[
-              { value: "meta", label: "Meta first" },
-              { value: "slot", label: "By slot" },
-              { value: "type", label: "By weapon type" },
-              { value: "source", label: "By source" },
-            ]}
+            options={GROUPS}
             onChange={(group) => setPrefs((p) => ({ ...p, group }))}
           />
+          <Dropdown label="Sort by" value={prefs.sort} options={SORTS} onChange={(sort) => setPrefs((p) => ({ ...p, sort }))} />
           <FilterButton
             open={filtersOpen}
             count={activeFilters(filters)}
@@ -394,6 +472,7 @@ const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: bool
     row.type_name,
     row.look.source,
     metaTier(row.meta) === "meta" ? "meta pick" : "",
+    row.look.breaker && BREAKERS[row.look.breaker] ? `${BREAKERS[row.look.breaker]} champions` : "",
     row.owned > 0 ? `you own ${row.owned}` : "not owned",
   ]
     .filter(Boolean)
@@ -407,7 +486,16 @@ const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: bool
       data-owned={row.owned > 0 || undefined}
       aria-pressed={props.selected}
       aria-label={label}
-      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.look.source ? ` · ${row.look.source}` : ""}${row.owned > 0 ? ` · You own ${row.owned}` : ""}${row.meta ? `\n${metaTip(row.meta)}` : ""}`}
+      data-tip={[
+        row.name,
+        `${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.look.source ? ` · ${row.look.source}` : ""}${row.owned > 0 ? ` · You own ${row.owned}` : ""}`,
+        [row.look.breaker ? BREAKERS[row.look.breaker] : "", row.look.season ? seasonLabel(row.look.season) : ""]
+          .filter(Boolean)
+          .join(" · "),
+        metaTip(row.meta),
+      ]
+        .filter(Boolean)
+        .join("\n")}
       onClick={() => props.onSelect(row.hash)}
     >
       <span className="pf-tile__art">
@@ -456,6 +544,18 @@ function CodexDetail(props: {
   const picked = picks.some((c) => c.length > 0);
   const chased = chase.list?.some((c) => c.weapon === row.hash && sameRoll(c.perks, picks)) ?? false;
   const best = copies[0];
+  // Per column, the perks your copies rolled and the ones they have active, to mark in the picker.
+  const yours = row.pools.map((_, i) => {
+    const rolled = new Set<number>();
+    const active = new Set<number>();
+    for (const c of copies) {
+      const col = c.columns[i];
+      if (!col) continue;
+      for (const h of col.options) rolled.add(h);
+      if (col.plugged != null) active.add(col.plugged);
+    }
+    return { rolled, active };
+  });
 
   function toggle(column: number, hash: number) {
     setStatus(null);
@@ -503,6 +603,7 @@ function CodexDetail(props: {
           <ElementBadge damage={row.look.damage} />
           <AmmoBadge ammo={row.look.ammo} />
           {row.look.slot > 0 && SLOTS[row.look.slot] && <span className="pf-chip">{SLOTS[row.look.slot]} slot</span>}
+          <WeaponExtraChips look={row.look} />
         </div>
 
         <p className="pf-codex__source">
@@ -563,25 +664,39 @@ function CodexDetail(props: {
                   {pool.length === 0 ? (
                     <span className="pf-muted">Nothing rolls here any more.</span>
                   ) : (
-                    pool.map((hash) => (
-                      <button
-                        key={hash}
-                        type="button"
-                        className="pf-perkpick"
-                        aria-pressed={picks[i]?.includes(hash)}
-                        onClick={() => toggle(i, hash)}
-                      >
-                        <PerkIcon hash={hash} perk={perks[hash]} size={30} decorative />
-                        <span className="pf-perkrow__name">{perks[hash]?.name ?? "Unknown perk"}</span>
-                        {picks[i]?.includes(hash) && <Check size={16} strokeWidth={3} className="pf-perkpick__check" aria-hidden="true" />}
-                      </button>
-                    ))
+                    pool.map((hash) => {
+                      const active = yours[i]?.active.has(hash);
+                      const rolled = yours[i]?.rolled.has(hash);
+                      return (
+                        <button
+                          key={hash}
+                          type="button"
+                          className="pf-perkpick"
+                          aria-pressed={picks[i]?.includes(hash)}
+                          data-have={rolled || undefined}
+                          data-selected={active || undefined}
+                          onClick={() => toggle(i, hash)}
+                        >
+                          <PerkIcon hash={hash} perk={perks[hash]} size={30} decorative />
+                          <span className="pf-perkrow__name">
+                            {perks[hash]?.name ?? "Unknown perk"}
+                            {active ? (
+                              <span className="pf-perkrow__on">{copies.length > 1 ? "Active on a copy" : "Active"}</span>
+                            ) : rolled ? (
+                              <span className="pf-perkpick__yours">On your copy</span>
+                            ) : null}
+                          </span>
+                          {picks[i]?.includes(hash) && <Check size={16} strokeWidth={3} className="pf-perkpick__check" aria-hidden="true" />}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               ))}
             </div>
             <p className="pf-muted pf-codex__hint">
               Pick one or more perks per column; a column left empty takes any perk.
+              {copies.length > 0 && " Glowing perks are active on your copies; outlined ones are rolled but not in use."}
             </p>
             {status && <Banner tone={status.tone}>{status.text}</Banner>}
             <div className="pf-row">

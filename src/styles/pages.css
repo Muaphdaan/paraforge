@@ -720,6 +720,13 @@ kbd {
 
 .pf-perkgrid__cell[data-have] .pf-perk {
   border-color: var(--accent);
+  box-shadow: var(--glow-accent-soft);
+}
+
+/* Active on the copy: filled and glowing; rolled but not active: outlined only. */
+.pf-perkgrid__cell[data-selected] .pf-perk {
+  border-width: 2px;
+  background: radial-gradient(circle at 35% 30%, #1f7f9a, #0f3a55);
   box-shadow: var(--glow-accent);
 }
 
@@ -960,6 +967,20 @@ kbd {
 
 .pf-perkpick .pf-perkrow__name { flex: 1; }
 .pf-perkpick__check { flex: none; color: var(--accent); }
+.pf-perkpick[data-have] .pf-perk { border-color: var(--accent); }
+.pf-perkpick[data-selected] .pf-perk {
+  border-width: 2px;
+  background: radial-gradient(circle at 35% 30%, #1f7f9a, #0f3a55);
+  box-shadow: var(--glow-accent);
+}
+.pf-perkpick__yours {
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
 
 /* ---- Chase list ---- */
 
@@ -1247,6 +1268,7 @@ kbd {
 
 .pf-roll__perk[data-have] { opacity: 1; color: var(--keep); }
 .pf-roll__perk[data-have] .pf-perk { box-shadow: 0 0 0 2px var(--keep); }
+.pf-roll__perk[data-selected] .pf-perk { box-shadow: 0 0 0 2px var(--keep), 0 0 10px rgb(61 245 168 / 0.55); }
 
 .pf-roll__picks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); margin: 0; }
 .pf-roll__picks div { display: flex; flex-direction: column; gap: 2px; }

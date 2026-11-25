@@ -4,7 +4,7 @@ import { ArrowRight, Check, Lock, MapPin, Sparkles } from "lucide-react";
 import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "../app/api";
 import { GodRolls } from "../ui/godrolls";
 import { TierPill, VerdictPill } from "../ui/parts";
-import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
+import { ActiveTag, AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, WeaponExtraChips, copyParts, selectedFirst } from "../ui/weapon";
 import { EquipButton } from "../ui/equip";
 
 export function WeaponDetail(props: {
@@ -47,6 +47,7 @@ export function WeaponDetail(props: {
           <ElementBadge damage={row.look.damage} />
           <AmmoBadge ammo={row.look.ammo} />
           {SLOTS[row.look.slot] && row.look.slot > 0 && <span className="pf-chip">{SLOTS[row.look.slot]} slot</span>}
+          <WeaponExtraChips look={row.look} />
           {row.tier > 0 && <TierPill tier={row.tier} />}
           {row.masterworked && (
             <span className="pf-chip pf-chip--gold">
@@ -112,12 +113,13 @@ export function WeaponDetail(props: {
             {row.columns.map((col, i) => (
               <div key={i} className="pf-perkcol">
                 <div className="pf-perkcol__label">{ROLE_LABELS[row.roles[i]] ?? "Perk"}</div>
-                {col.options.map((hash) => (
-                  <div key={hash} className="pf-perkrow">
+                {selectedFirst(col).map((hash) => (
+                  <div key={hash} className="pf-perkrow" data-selected={col.plugged === hash || undefined}>
                     <PerkIcon hash={hash} perk={perks[hash]} enhanced={col.enhanced} size={34} />
                     <span className="pf-perkrow__name">
                       {perks[hash]?.name ?? "Unknown perk"}
                       {col.enhanced && <span className="pf-perkrow__enh">Enhanced</span>}
+                      {col.plugged === hash && col.options.length > 1 && <ActiveTag />}
                     </span>
                   </div>
                 ))}
@@ -159,7 +161,7 @@ export function WeaponDetail(props: {
                   <TierPill tier={c.tier} />
                   <span className="pf-copy__perks">
                     {c.columns.map((col, j) =>
-                      col.options
+                      selectedFirst(col)
                         .slice(0, 1)
                         .map((h) => <PerkIcon key={`${j}-${h}`} hash={h} perk={perks[h]} enhanced={col.enhanced} size={22} />),
                     )}

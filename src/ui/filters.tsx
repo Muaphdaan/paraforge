@@ -1,21 +1,44 @@
-// The advanced filters shared by the Codex and the Vault: element, ammo, weapon type, frame,
-// meta picks and weapons with god rolls.
+// The advanced filters shared by the Codex and the Vault: slot, element, ammo, champion, weapon
+// type, frame, source, season, craftable, adept, meta picks and weapons with god rolls.
 import { useMemo } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
-import { AMMO, CopyPart, ELEMENTS, Perk, WeaponLook, WeaponPart, metaTier } from "../app/api";
+import { AMMO, BREAKERS, CopyPart, ELEMENTS, Perk, SLOTS, WeaponLook, WeaponPart, metaTier } from "../app/api";
+import { seasonLabel } from "../app/seasons";
 import { Dropdown, Toggle } from "./parts";
 import { ElementIcon } from "./weapon";
 
 export type WeaponFilters = {
+  /** 1 Kinetic, 2 Energy, 3 Power. */
+  slots: number[];
   elements: number[];
   ammo: number[];
+  /** Champions it stuns on its own (see `BREAKERS`). */
+  breakers: number[];
   type: string;
   frame: string;
+  source: string;
+  /** Bungie's season number as text, "" for any. */
+  season: string;
+  craftable: boolean;
+  adept: boolean;
   metaOnly: boolean;
   withRolls: boolean;
 };
 
-export const NO_FILTERS: WeaponFilters = { elements: [], ammo: [], type: "", frame: "", metaOnly: false, withRolls: false };
+export const NO_FILTERS: WeaponFilters = {
+  slots: [],
+  elements: [],
+  ammo: [],
+  breakers: [],
+  type: "",
+  frame: "",
+  source: "",
+  season: "",
+  craftable: false,
+  adept: false,
+  metaOnly: false,
+  withRolls: false,
+};
 
 type Filterable = { look: WeaponLook; type_name: string; parts?: (WeaponPart | CopyPart)[]; meta?: number };
 
@@ -29,18 +52,29 @@ export function frameOf(row: Filterable, perks: Record<number, Perk>): string {
 
 export function activeFilters(f: WeaponFilters): number {
   return (
-    f.elements.length + f.ammo.length + (f.type ? 1 : 0) + (f.frame ? 1 : 0) + (f.metaOnly ? 1 : 0) + (f.withRolls ? 1 : 0)
+    f.slots.length +
+    f.elements.length +
+    f.ammo.length +
+    f.breakers.length +
+    [f.type, f.frame, f.source, f.season, f.craftable, f.adept, f.metaOnly, f.withRolls].filter(Boolean).length
   );
 }
 
 export function applyFilters<T extends Filterable>(rows: T[], f: WeaponFilters, perks: Record<number, Perk>): T[] {
   if (activeFilters(f) === 0) return rows;
+  const season = Number(f.season);
   return rows.filter(
     (r) =>
+      (f.slots.length === 0 || f.slots.includes(r.look.slot)) &&
       (f.elements.length === 0 || f.elements.includes(r.look.damage)) &&
       (f.ammo.length === 0 || f.ammo.includes(r.look.ammo)) &&
+      (f.breakers.length === 0 || f.breakers.includes(r.look.breaker ?? 0)) &&
       (!f.type || r.type_name === f.type) &&
       (!f.frame || frameOf(r, perks) === f.frame) &&
+      (!f.source || r.look.source === f.source) &&
+      (!f.season || r.look.season === season) &&
+      (!f.craftable || r.look.craftable === true) &&
+      (!f.adept || r.look.adept === true) &&
       (!f.metaOnly || metaTier(r.meta) === "meta") &&
       (!f.withRolls || (r.meta ?? 0) > 0),
   );
@@ -69,13 +103,36 @@ export function FilterPanel(props: {
           props.rows
             .filter((r) => !f.type || r.type_name === f.type)
             .map((r) => frameOf(r, props.perks))
+            .concat(f.frame ? [f.frame] : [])
             .filter(Boolean),
         ),
       ].sort((a, b) => a.localeCompare(b)),
-    [props.rows, props.perks, f.type],
+    [props.rows, props.perks, f.type, f.frame],
   );
+  // A choice still on is always listed, even when a search hides every weapon it matches, so the
+  // dropdown shows it and it can be cleared.
+  const sources = useMemo(() => {
+    const list = new Set(props.rows.map((r) => r.look.source).filter(Boolean));
+    if (f.source) list.add(f.source);
+    return [...list].sort((a, b) => a.localeCompare(b));
+  }, [props.rows, f.source]);
+  // Newest first, since recent seasons are the ones people look for.
+  const seasons = useMemo(() => {
+    const list = new Set(props.rows.map((r) => r.look.season ?? 0).filter((n) => n > 0));
+    if (Number(f.season) > 0) list.add(Number(f.season));
+    return [...list].sort((a, b) => b - a);
+  }, [props.rows, f.season]);
+  // Weapons read before this version have every new field at its default until the next sync, and
+  // almost every weapon has a known season, so none at all means the data has not arrived yet.
+  const hasExtras = props.rows.length === 0 || props.rows.some((r) => (r.look.season ?? 0) > 0);
   return (
     <div className="pf-filterpanel" role="group" aria-label="Filters">
+      <ChipRow
+        label="Slot"
+        options={[1, 2, 3].map((n) => ({ value: n, label: SLOTS[n] }))}
+        value={f.slots}
+        onChange={(slots) => set({ slots })}
+      />
       <div className="pf-filterpanel__row">
         <span className="pf-filterpanel__label">Element</span>
         <div className="pf-chips">
@@ -111,6 +168,13 @@ export function FilterPanel(props: {
           ))}
         </div>
       </div>
+      <ChipRow
+        label="Champion"
+        options={Object.entries(BREAKERS).map(([n, name]) => ({ value: Number(n), label: name }))}
+        value={f.breakers}
+        onChange={(breakers) => set({ breakers })}
+        note="Weapons that stun on their own, without an artifact mod."
+      />
       <div className="pf-filterpanel__row pf-filterpanel__row--controls">
         <Dropdown
           label="Weapon type"
@@ -120,11 +184,33 @@ export function FilterPanel(props: {
         />
         <Dropdown
           label="Frame"
-          value={frames.includes(f.frame) ? f.frame : ""}
+          value={f.frame}
           options={[{ value: "", label: "Every frame" }, ...frames.map((t) => ({ value: t, label: t }))]}
           onChange={(frame) => set({ frame })}
           disabled={frames.length === 0}
         />
+        <Dropdown
+          label="Source"
+          value={f.source}
+          options={[{ value: "", label: "Every source" }, ...sources.map((t) => ({ value: t, label: t }))]}
+          onChange={(source) => set({ source })}
+          disabled={sources.length === 0}
+        />
+        <Dropdown
+          label="Season"
+          value={f.season}
+          options={[
+            { value: "", label: "Every season" },
+            ...seasons.map((n) => ({ value: String(n), label: seasonLabel(n) })),
+          ]}
+          onChange={(season) => set({ season })}
+          disabled={seasons.length === 0}
+        />
+      </div>
+      <div className="pf-filterpanel__row pf-filterpanel__row--controls">
+        <Toggle label="Craftable" checked={f.craftable} onChange={(craftable) => set({ craftable })} />
+        <Toggle label="Adept only" checked={f.adept} onChange={(adept) => set({ adept })} />
+        {!hasExtras && <span className="pf-muted pf-filterpanel__note">Champion, season, craftable and adept appear after your next sync.</span>}
         <Toggle label="Meta picks only" checked={f.metaOnly} onChange={(metaOnly) => set({ metaOnly })} />
         <Toggle label="Has god rolls" checked={f.withRolls} onChange={(withRolls) => set({ withRolls })} />
         {activeFilters(f) > 0 && (
@@ -133,6 +219,35 @@ export function FilterPanel(props: {
             Clear filters
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** A labelled row of on/off chips; none on means any. */
+function ChipRow(props: {
+  label: string;
+  options: { value: number; label: string }[];
+  value: number[];
+  onChange: (value: number[]) => void;
+  note?: string;
+}) {
+  return (
+    <div className="pf-filterpanel__row">
+      <span className="pf-filterpanel__label">{props.label}</span>
+      <div className="pf-chips">
+        {props.options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            className="pf-chipbtn pf-chipbtn--small"
+            aria-pressed={props.value.includes(o.value)}
+            onClick={() => props.onChange(toggle(props.value, o.value))}
+          >
+            {o.label}
+          </button>
+        ))}
+        {props.note && <span className="pf-muted pf-filterpanel__note">{props.note}</span>}
       </div>
     </div>
   );
@@ -147,7 +262,7 @@ export function FilterButton(props: { open: boolean; count: number; onClick: () 
       aria-expanded={props.open}
       aria-controls={props.controls}
       onClick={props.onClick}
-      data-tip="Filter by element, ammo, type, frame and meta"
+      data-tip="Filter by slot, element, ammo, champion, type, frame, source, season and more"
     >
       <SlidersHorizontal size={16} aria-hidden="true" />
       Filters

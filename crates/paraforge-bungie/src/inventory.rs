@@ -87,6 +87,8 @@ pub struct RawDisplay {
 pub struct RawInventoryBlock {
     pub tier_type: u8,
     pub bucket_type_hash: u32,
+    /// Set on weapons that have a crafting pattern.
+    pub recipe_item_hash: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -154,6 +156,8 @@ pub struct RawItemDef {
     pub equipping_block: RawEquippingBlock,
     pub default_damage_type: u8,
     pub collectible_hash: Option<u32>,
+    /// DestinyBreakerType: 1 ShieldPiercing, 2 Disruption, 3 Stagger.
+    pub breaker_type: u8,
 }
 
 /// The fields of `DestinyCollectibleDefinition` that ParaForge reads.
@@ -174,7 +178,60 @@ pub const BUCKET_KINETIC: u32 = 1_498_876_634;
 pub const BUCKET_ENERGY: u32 = 2_465_295_065;
 pub const BUCKET_POWER: u32 = 953_998_645;
 
-fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>) -> WeaponLook {
+/// Item hash -> season, from d2-additional-info.
+const SEASONS_JSON: &str = include_str!("../data/seasons.json");
+/// Season badge (watermark) -> season, for items the list above does not have yet.
+const WATERMARK_SEASONS_JSON: &str = include_str!("../data/watermark-to-season.json");
+/// Item hash -> breaker type hash, for champion stuns that come from an intrinsic or exotic perk.
+const EXTENDED_BREAKER_JSON: &str = include_str!("../data/extended-breaker.json");
+/// DestinyBreakerTypeDefinition hashes.
+const BREAKER_SHIELD_PIERCING: u32 = 485_622_768;
+const BREAKER_DISRUPTION: u32 = 2_611_060_930;
+const BREAKER_STAGGER: u32 = 3_178_805_705;
+
+/// Seasons and champion breakers that the item database does not say directly.
+pub struct ExtraInfo {
+    seasons: HashMap<String, u8>,
+    watermarks: HashMap<String, u8>,
+    breakers: HashMap<String, u32>,
+}
+
+impl ExtraInfo {
+    pub fn bundled() -> Self {
+        Self {
+            seasons: serde_json::from_str(SEASONS_JSON).unwrap_or_default(),
+            watermarks: serde_json::from_str(WATERMARK_SEASONS_JSON).unwrap_or_default(),
+            breakers: serde_json::from_str(EXTENDED_BREAKER_JSON).unwrap_or_default(),
+        }
+    }
+
+    fn season(&self, item: &RawItemDef) -> u8 {
+        self.seasons
+            .get(&item.hash.to_string())
+            .or_else(|| self.watermarks.get(&item.icon_watermark))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn breaker(&self, item: &RawItemDef) -> u8 {
+        if (1..=3).contains(&item.breaker_type) {
+            return item.breaker_type;
+        }
+        match self.breakers.get(&item.hash.to_string()) {
+            Some(&BREAKER_SHIELD_PIERCING) => 1,
+            Some(&BREAKER_DISRUPTION) => 2,
+            Some(&BREAKER_STAGGER) => 3,
+            _ => 0,
+        }
+    }
+}
+
+/// Adept-style variants carry their tag in the name, for example "Fatebringer (Timelost)".
+fn is_adept(name: &str) -> bool {
+    ["(Adept)", "(Timelost)", "(Harrowed)"].iter().any(|tag| name.trim_end().ends_with(tag))
+}
+
+fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>, extra: &ExtraInfo) -> WeaponLook {
     let collectible = item.collectible_hash.unwrap_or(0);
     let source = collectibles.get(&collectible.to_string()).map(|c| clean_source(&c.source_string)).unwrap_or_default();
     WeaponLook {
@@ -192,6 +249,10 @@ fn look(item: &RawItemDef, collectibles: &HashMap<String, RawCollectibleDef>) ->
         rarity: item.inventory.tier_type,
         source,
         collectible,
+        breaker: extra.breaker(item),
+        craftable: item.inventory.recipe_item_hash.is_some_and(|h| h != 0),
+        adept: is_adept(&item.display_properties.name),
+        season: extra.season(item),
     }
 }
 
@@ -352,6 +413,7 @@ pub fn build_catalog(
 ) -> Catalog {
     let mut catalog = Catalog::default();
     let mut perk_hashes = HashSet::new();
+    let extra = ExtraInfo::bundled();
     for item in items.values().filter(|i| is_weapon(i)) {
         let mut columns = Vec::new();
         let mut socket_indexes = Vec::new();
@@ -411,7 +473,7 @@ pub fn build_catalog(
             type_name: item.item_type_display_name.clone(),
             columns,
             socket_indexes,
-            look: look(item, collectibles),
+            look: look(item, collectibles, &extra),
             pools,
             parts,
         });
@@ -707,7 +769,8 @@ fn read_copy(
             .and_then(|r| r.plugs.get(&index.to_string()))
             .map(|plugs| plugs.iter().map(|p| p.plug_item_hash).collect())
             .unwrap_or_default();
-        if let Some(plugged) = sockets.sockets.get(index as usize).and_then(|s| s.plug_hash)
+        let selected = sockets.sockets.get(index as usize).and_then(|s| s.plug_hash).filter(|h| *h != 0);
+        if let Some(plugged) = selected
             && !raw.contains(&plugged)
         {
             raw.push(plugged);
@@ -719,7 +782,11 @@ fn read_copy(
                 options.push(perk);
             }
         }
-        columns.push(CopyColumn { options, enhanced: is_enhanced });
+        columns.push(CopyColumn {
+            options,
+            enhanced: is_enhanced,
+            plugged: selected.map(|h| PerkHash(enhanced.base(h))),
+        });
     }
     if def.socket_indexes.len() != def.columns.len() {
         return None;
@@ -982,6 +1049,17 @@ mod tests {
     }
 
     #[test]
+    fn bundled_extra_info_loads() {
+        let extra = ExtraInfo::bundled();
+        assert!(extra.seasons.len() > 1000 && !extra.watermarks.is_empty() && !extra.breakers.is_empty());
+        let item = |hash: u32, breaker_type: u8| RawItemDef { hash, breaker_type, ..Default::default() };
+        assert_eq!(extra.breaker(&item(1, 2)), 2, "the item's own breaker type wins");
+        let (hash, kind) = extra.breakers.iter().next().map(|(h, k)| (h.parse::<u32>().unwrap(), *k)).unwrap();
+        assert_ne!(extra.breaker(&item(hash, 0)), 0, "extended breaker {kind} maps to a champion");
+        assert!(is_adept("Fatebringer (Timelost)") && is_adept("Unforgiven (Adept)") && !is_adept("Adept Rifle"));
+    }
+
+    #[test]
     fn catalog_reads_how_weapons_look() {
         let (items, sets) = manifest();
         let c = build_catalog(&items, &sets, &collectibles(), &enhanced());
@@ -998,6 +1076,7 @@ mod tests {
                 rarity: 5,
                 source: "Last Wish raid".into(),
                 collectible: 900,
+                ..Default::default()
             }
         );
         let exotic = c.weapons.iter().find(|w| w.hash == WeaponHash(3000)).expect("exotics are kept");
@@ -1078,6 +1157,11 @@ mod tests {
         // Enhanced 2617553311 is stored as its normal version 1955165503.
         assert!(t4.columns[2].options.contains(&PerkHash(1_955_165_503)));
         assert!(!t4.columns[2].options.contains(&PerkHash(2_617_553_311)));
+        // The selected perk is recorded per column, as its normal version, and is one of the options.
+        for c in t4.columns.iter().chain(&by_id["6917529257805248292"].columns) {
+            let plugged = c.plugged.expect("every column has a selected perk");
+            assert!(c.options.contains(&plugged), "{c:?}");
+        }
 
         // Untiered legacy copy, locked.
         let legacy = by_id["6917529257805248292"];

@@ -125,7 +125,17 @@ export function Dropdown<T extends string>(props: {
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
 
+  // Keep the highlighted option in view when the menu opens or the arrow keys move through a long
+  // list; never when the mouse moves the highlight, which would scroll the list under the pointer.
+  const scrollToActive = useRef(false);
+  useEffect(() => {
+    if (!open || !scrollToActive.current) return;
+    scrollToActive.current = false;
+    document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [open, active, listId]);
+
   function show() {
+    scrollToActive.current = true;
     setActive(Math.max(0, props.options.findIndex((o) => o.value === props.value)));
     setOpen(true);
   }
@@ -146,9 +156,11 @@ export function Dropdown<T extends string>(props: {
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      scrollToActive.current = true;
       setActive((i) => Math.min(props.options.length - 1, i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      scrollToActive.current = true;
       setActive((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();

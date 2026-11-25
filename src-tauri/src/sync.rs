@@ -26,7 +26,7 @@ const COLLECTIBLES_TABLE: &str = "DestinyCollectibleDefinition";
 const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
-const CATALOG_VERSION: &str = "catalog-5";
+const CATALOG_VERSION: &str = "catalog-6";
 /// Bumped when ParaForge reads more from the god-roll list, so the next sync rebuilds the rolls.
 const ROLLS_VERSION: &str = "rolls-2";
 /// The Bungie membership whose weapons are stored.

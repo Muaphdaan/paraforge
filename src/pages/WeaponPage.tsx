@@ -19,7 +19,7 @@ import {
 import { useSession } from "../app/session";
 import { EmptyState, TierPill, useCopy, VerdictPill } from "../ui/parts";
 import { GodRolls } from "../ui/godrolls";
-import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
+import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, WeaponExtraChips, copyParts, selectedFirst } from "../ui/weapon";
 import { EquipButton } from "../ui/equip";
 
 type ScoreMap = Record<string, CopyScore>;
@@ -136,6 +136,7 @@ function Hero({ row, context }: { row: VaultRow; context: ScoreContext }) {
           <ElementBadge damage={row.look.damage} />
           <AmmoBadge ammo={row.look.ammo} />
           {SLOTS[row.look.slot] && row.look.slot > 0 && <span className="pf-chip">{SLOTS[row.look.slot]} slot</span>}
+          <WeaponExtraChips look={row.look} />
           {row.tier > 0 && <TierPill tier={row.tier} />}
           {row.masterworked && (
             <span className="pf-chip pf-chip--gold">
@@ -236,15 +237,22 @@ function PerksCard(props: { row: VaultRow; def: WeaponDef | null | undefined; pe
           <div className="pf-perkgrid">
             {row.columns.map((col, i) => {
               const have = new Set(col.options);
-              // The pool, with this copy's perks first; a retired perk this copy still has is added.
+              // The pool, with this copy's perks first (the selected one on top); a retired perk this
+              // copy still has is added.
               const pool = def?.pools[i] ?? [];
-              const all = [...col.options, ...pool.filter((h) => !have.has(h))];
+              const all = [...selectedFirst(col), ...pool.filter((h) => !have.has(h))];
               return (
                 <div key={i} className="pf-perkgrid__col" role="group" aria-label={ROLE_LABELS[row.roles[i]] ?? "Perk"}>
                   <div className="pf-perkgrid__label">{ROLE_LABELS[row.roles[i]] ?? "Perk"}</div>
                   {all.map((hash) => (
-                    <span key={hash} className="pf-perkgrid__cell" data-have={have.has(hash) || undefined}>
+                    <span
+                      key={hash}
+                      className="pf-perkgrid__cell"
+                      data-have={have.has(hash) || undefined}
+                      data-selected={col.plugged === hash || undefined}
+                    >
                       <PerkIcon hash={hash} perk={perks[hash]} enhanced={have.has(hash) && col.enhanced} size={40} />
+                      {col.plugged === hash && <span className="pf-visually-hidden">(active on your copy)</span>}
                     </span>
                   ))}
                 </div>
@@ -253,7 +261,9 @@ function PerksCard(props: { row: VaultRow; def: WeaponDef | null | undefined; pe
           </div>
           <p className="pf-muted pf-perkgrid__note">
             {def
-              ? "Lit perks are on your copy. The rest can roll on this weapon."
+              ? row.columns.some((c) => c.plugged != null)
+                ? "Filled perks are active on your copy, outlined ones are rolled and can be switched to, and the rest can roll on this weapon."
+                : "Lit perks are on your copy. The rest can roll on this weapon."
               : def === undefined
                 ? "Loading every perk this weapon can roll..."
                 : "Only your copy's perks are shown; the full list comes after your next sync."}
@@ -263,7 +273,9 @@ function PerksCard(props: { row: VaultRow; def: WeaponDef | null | undefined; pe
               <li key={i}>
                 <span className="pf-muted">{ROLE_LABELS[row.roles[i]] ?? "Perk"}</span>
                 <strong>
-                  {col.options.map((h) => perks[h]?.name ?? "Unknown perk").join(" or ")}
+                  {selectedFirst(col)
+                    .map((h) => `${perks[h]?.name ?? "Unknown perk"}${col.plugged === h && col.options.length > 1 ? " (active)" : ""}`)
+                    .join(" or ")}
                   {col.enhanced && <span className="pf-perkrow__enh">Enhanced</span>}
                 </strong>
               </li>

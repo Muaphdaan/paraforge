@@ -68,7 +68,7 @@ fn roll(hash: u32) -> CuratedRoll {
 }
 
 fn col(perk: u32, enhanced: bool) -> CopyColumn {
-    CopyColumn { options: vec![PerkHash(perk)], enhanced }
+    CopyColumn { options: vec![PerkHash(perk)], enhanced, plugged: Some(PerkHash(perk)) }
 }
 
 fn copy(id: &str, weapon: u32, tier: u8, perks: [u32; 4], enhanced: [bool; 4], masterworked: bool) -> WeaponCopy {

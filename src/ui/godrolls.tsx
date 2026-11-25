@@ -7,7 +7,7 @@ import { Check, ChevronDown, ChevronUp, Crosshair, Crown } from "lucide-react";
 import { ColumnRole, CopyColumn, CuratedRoll, Perk, ROLE_LABELS, ScoreContext } from "../app/api";
 import { useSession } from "../app/session";
 import { EquipButton } from "./equip";
-import { PerkIcon } from "./weapon";
+import { ActiveTag, PerkIcon } from "./weapon";
 
 /** An owned copy to compare rolls with: any vault row fits. */
 export type OwnedCopy = { instance_id: string; columns: CopyColumn[] };
@@ -324,11 +324,17 @@ function RollCard(props: {
               <span className="pf-roll__perks">
                 {want.map((h) => {
                   const have = copy?.columns[i]?.options.includes(h);
+                  const active = have && copy?.columns[i]?.plugged === h;
                   return (
-                    <span key={h} className="pf-roll__perk" data-have={have || undefined}>
+                    <span key={h} className="pf-roll__perk" data-have={have || undefined} data-selected={active || undefined}>
                       <PerkIcon hash={h} perk={props.perks[h]} size={props.compact ? 24 : 28} decorative />
                       <span>{props.perks[h]?.name ?? "Unknown perk"}</span>
-                      {copy && <span className="pf-visually-hidden">{have ? " (on your copy)" : " (missing)"}</span>}
+                      {active && <ActiveTag />}
+                      {copy && (
+                        <span className="pf-visually-hidden">
+                          {active ? " (active on your copy)" : have ? " (rolled on your copy)" : " (missing)"}
+                        </span>
+                      )}
                     </span>
                   );
                 })}

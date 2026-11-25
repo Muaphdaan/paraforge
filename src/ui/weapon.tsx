@@ -1,9 +1,10 @@
 // Weapon pieces shared by Vault and Home: the icon tile, element and ammo badges, perk icons.
 // Icons and screenshots come from Bungie's servers (bungie.net), like DIM and light.gg.
 import { useState } from "react";
-import { Circle, Crown, Hexagon, Lock, Snowflake, Spline, Sun, Trash2, Zap } from "lucide-react";
+import { Circle, Crown, Hammer, Hexagon, Lock, ShieldAlert, Snowflake, Spline, Sun, Trash2, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AMMO, CopyPart, ELEMENTS, PartKind, Perk, VaultRow, WeaponPart, bungieImage, metaTier, metaTip } from "../app/api";
+import { AMMO, BREAKERS, CopyColumn, CopyPart, ELEMENTS, WeaponLook, PartKind, Perk, VaultRow, WeaponPart, bungieImage, metaTier, metaTip } from "../app/api";
+import { SEASONS, seasonLabel } from "../app/seasons";
 
 const ELEMENT_ICONS: Record<number, LucideIcon> = {
   1: Circle,
@@ -179,7 +180,14 @@ const PART_EMPTY: Record<PartKind, string> = {
 };
 
 /** One part as shown: its kind and the perks in it (both options for a two-choice origin trait). */
-export type ShownPart = { kind: PartKind; perks: number[]; /** The perk that is enhanced, if any. */ enhanced?: number };
+export type ShownPart = {
+  kind: PartKind;
+  perks: number[];
+  /** The perk that is enhanced, if any. */
+  enhanced?: number;
+  /** The perk in use on this copy, when it has a choice (origin traits) or for the masterwork and mod. */
+  selected?: number;
+};
 
 /** A copy's frame, origin trait, masterwork, mod and catalyst. */
 export function copyParts(parts: CopyPart[] | undefined): ShownPart[] {
@@ -187,6 +195,8 @@ export function copyParts(parts: CopyPart[] | undefined): ShownPart[] {
     kind: p.kind,
     perks: p.options.length > 0 ? p.options : p.plugged !== null ? [p.plugged] : [],
     enhanced: p.enhanced && p.plugged !== null ? p.plugged : undefined,
+    // The frame never changes, so only parts that can differ between copies are marked.
+    selected: p.kind === "intrinsic" ? undefined : (p.plugged ?? undefined),
   }));
 }
 
@@ -220,12 +230,14 @@ export function PartList(props: {
               part.perks.map((hash) => {
                 const perk = props.perks[hash];
                 const enhanced = part.enhanced === hash;
+                const selected = part.selected === hash;
                 return (
-                  <div key={hash} className="pf-perkrow">
+                  <div key={hash} className="pf-perkrow" data-selected={selected || undefined}>
                     <PerkIcon hash={hash} perk={perk} enhanced={enhanced} size={props.size ?? 34} decorative />
                     <span className="pf-perkrow__name">
                       {perk?.name ?? "Unknown perk"}
                       {enhanced && <span className="pf-perkrow__enh">Enhanced</span>}
+                      {selected && part.perks.length > 1 && <ActiveTag />}
                       {props.describe && perk?.description && (
                         <span className="pf-part__desc">{perk.description}</span>
                       )}
@@ -239,6 +251,44 @@ export function PartList(props: {
       })}
     </div>
   );
+}
+
+/** Champion breaker, season, craftable and adept chips for a weapon's fact list. */
+export function WeaponExtraChips({ look }: { look: WeaponLook }) {
+  const breaker = look.breaker ? BREAKERS[look.breaker] : undefined;
+  return (
+    <>
+      {breaker && (
+        <span className="pf-chip pf-chip--champion" data-breaker={look.breaker} data-tip={`Stuns ${breaker} champions on its own`}>
+          <ShieldAlert size={12} aria-hidden="true" />
+          {breaker}
+        </span>
+      )}
+      {look.craftable && (
+        <span className="pf-chip" data-tip="Has a crafting pattern">
+          <Hammer size={12} aria-hidden="true" />
+          Craftable
+        </span>
+      )}
+      {look.adept && <span className="pf-chip pf-chip--gold">Adept</span>}
+      {look.season ? (
+        <span className="pf-chip" data-tip={`Came out in ${seasonLabel(look.season)}`}>
+          {SEASONS[look.season]?.name ?? `Season ${look.season}`}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** "Active" next to the perk a copy is using right now. */
+export function ActiveTag() {
+  return <span className="pf-perkrow__on">Active</span>;
+}
+
+/** A copy's perks in one column with the selected one first. */
+export function selectedFirst(col: CopyColumn): number[] {
+  const on = col.plugged;
+  return on != null && col.options.includes(on) ? [on, ...col.options.filter((h) => h !== on)] : col.options;
 }
 
 /** A small crown on the tiles of meta weapons (see `META_TOP`). */

@@ -101,11 +101,27 @@ export type WeaponLook = {
   source: string;
   /** Its Collections entry, 0 when it has none. */
   collectible: number;
+  /** The champion it stuns on its own: 1 Barrier, 2 Overload, 3 Unstoppable, 0 none. 0 for every weapon until the first sync on this version. */
+  breaker?: number;
+  /** Has a crafting pattern. */
+  craftable?: boolean;
+  /** An Adept, Timelost or Harrowed version. */
+  adept?: boolean;
+  /** Bungie's season number it came out in (1 = Red War), 0 when unknown. */
+  season?: number;
 };
+
+/** Champion types a weapon can stun on its own. */
+export const BREAKERS: Record<number, string> = { 1: "Anti-Barrier", 2: "Overload", 3: "Unstoppable" };
 
 export type ColumnRole = "barrel" | "magazine" | "trait";
 
-export type CopyColumn = { options: number[]; enhanced: boolean };
+export type CopyColumn = {
+  options: number[];
+  enhanced: boolean;
+  /** The perk selected right now; missing before the next sync. */
+  plugged?: number | null;
+};
 
 /** A weapon socket that is not a random-perk column. */
 export type PartKind = "intrinsic" | "origin" | "masterwork" | "mod" | "catalyst";
