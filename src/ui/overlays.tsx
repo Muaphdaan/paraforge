@@ -199,8 +199,10 @@ function itemsFor(target: Element | null): MenuItem[] {
 }
 
 /** Cut, Copy, Paste and Select all for the Edit menu, acting on the focused field or selection. */
-export function editCommands(): { label: string; keys: string; run: () => void; disabled: boolean }[] {
-  const available = itemsFor(document.activeElement);
+export function editCommands(
+  target: Element | null = document.activeElement,
+): { label: string; keys: string; run: () => void; disabled: boolean }[] {
+  const available = itemsFor(target);
   return [
     ["Cut", "Ctrl+X"],
     ["Copy", "Ctrl+C"],

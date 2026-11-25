@@ -1,5 +1,5 @@
 // The ParaForge window: floating sidebar, page header, banners and the current section.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import backdrop from "./assets/backdrop.webp";
 import { PAGE_ORDER, PageId } from "./app/pages";
 import { SessionProvider, useSession } from "./app/session";
@@ -165,7 +165,7 @@ function Shell() {
         { label: "Exit", keys: "Alt+F4", run: closeWindow },
       ],
     },
-    { id: "edit", label: "Edit", mnemonic: "E", items: () => [...editCommands(), "separator", { label: "Find", keys: "Ctrl+F", run: () => setSearchOpen(true) }] },
+    { id: "edit", label: "Edit", mnemonic: "E", items: (target) => [...editCommands(target), "separator", { label: "Find", keys: "Ctrl+F", run: () => setSearchOpen(true) }] },
     {
       id: "view",
       label: "View",
@@ -286,31 +286,35 @@ function Shell() {
 /** Menus for the screens before the app proper (loading and first run). */
 const BASIC_MENUS: MenuDef[] = [
   { id: "file", label: "File", mnemonic: "F", items: () => [{ label: "Exit", keys: "Alt+F4", run: closeWindow }] },
-  { id: "edit", label: "Edit", mnemonic: "E", items: editCommands },
+  { id: "edit", label: "Edit", mnemonic: "E", items: (target) => editCommands(target) },
 ];
 
-/** A toast when a sync ends: what it found, with a way to review new drops. */
+/**
+ * A toast when a sync the player asked for ends, and when any sync finds new drops (with a way
+ * to review them). Automatic syncs that find nothing stay quiet in the status bar.
+ */
 function SyncToasts({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const session = useSession();
   const toast = useToast();
-  const was = useRef<string | null>(null);
+  const last = session.lastSync;
   useEffect(() => {
-    if (was.current && !session.syncStep) {
-      if (session.syncError) {
-        // Automatic syncs fail quietly into the status bar; a sync the player asked for says so.
-        if (!session.syncErrorAuto) toast({ tone: "error", text: `Sync failed: ${session.syncError}` });
-      } else {
-        const drops = (session.vault ?? []).filter((r) => (r.first_seen ?? 0) > 0 && !r.mark).length;
-        toast({
-          tone: "success",
-          text: drops > 0 ? `Synced. ${drops} new ${drops === 1 ? "drop" : "drops"} to review.` : "Synced. Your vault is up to date.",
-          action: drops > 0 ? { label: "Review", run: () => onNavigate("triage") } : undefined,
-        });
-      }
+    if (!last) return;
+    if (!last.ok) {
+      if (!last.auto) toast({ tone: "error", text: `Sync failed: ${session.syncError ?? "unknown error"}` });
+      return;
     }
-    was.current = session.syncStep;
-    // Only the end of a sync matters; the rest is read when it happens.
-  }, [session.syncStep]);
+    const n = last.newDrops;
+    if (n > 0) {
+      toast({
+        tone: "success",
+        text: `Synced. ${n} new ${n === 1 ? "drop" : "drops"} to review.`,
+        action: { label: "Review", run: () => onNavigate("triage") },
+      });
+    } else if (!last.auto) {
+      toast({ tone: "success", text: "Synced. No new drops." });
+    }
+    // Only a new sync result matters. session.syncError is set in the same update as lastSync.
+  }, [last]);
   return null;
 }
 

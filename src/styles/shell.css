@@ -533,7 +533,7 @@ button.pf-statusbar__item[aria-disabled="true"] { cursor: default; }
 .pf-modal {
   position: fixed;
   inset: 0;
-  z-index: 95;
+  z-index: 110;
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -574,3 +574,4 @@ button.pf-statusbar__item[aria-disabled="true"] { cursor: default; }
   .pf-toast,
   .pf-modal__box { animation: none; }
 }
+.pf-modal__box:focus { outline: none; }

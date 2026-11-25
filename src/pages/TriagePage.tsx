@@ -1,7 +1,7 @@
 // Triage: review what dropped since the first sync (keep, shard or later, with K, S and L), and
 // rank the copies of each weapon you own more than once. Decisions are ParaForge notes: nothing
 // changes in the game.
-import { KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
+import { KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, Inbox, RotateCcw, Trash2 } from "lucide-react";
 import { CopyMark, ROLE_LABELS, VaultRow, byMeta, reasonText } from "../app/api";
 import { useSession } from "../app/session";
@@ -138,22 +138,45 @@ function Drops(props: { drops: VaultRow[]; reviewed: VaultRow[]; rows: VaultRow[
     return [...open.filter((r) => !skipped.includes(r.instance_id)), ...open.filter((r) => skipped.includes(r.instance_id))];
   }, [props.drops, skipped, pending]);
   const current = queue[0] ?? null;
+  // What screen readers hear after each decision.
+  const [said, setSaid] = useState("");
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const hadCurrent = useRef(Boolean(current));
+  // When the last drop is decided, focus moves to the "all done" message instead of the page.
+  useEffect(() => {
+    if (hadCurrent.current && !current) emptyRef.current?.focus();
+    hadCurrent.current = Boolean(current);
+  }, [current]);
+
+  const nextAfter = (row: VaultRow) => {
+    const rest = queue.filter((r) => r.instance_id !== row.instance_id);
+    return rest.length > 0 ? ` Now showing ${rest[0].name}, ${rest.length} to review.` : " No new drops left to review.";
+  };
 
   async function decide(mark: CopyMark | null, row: VaultRow) {
     if (pending.includes(row.instance_id)) return;
     setError(null);
     setPending((p) => [...p, row.instance_id]);
+    const verb = mark === "keep" ? "Kept" : mark === "shard" ? "Marked to shard:" : "Back in the queue:";
     try {
       await session.markCopy(row.instance_id, mark);
+      setSaid(`${verb} ${row.name}.${mark ? nextAfter(row) : ""}`);
     } catch (e) {
       setError(String(e));
+      setSaid(`Could not save the decision on ${row.name}.`);
     } finally {
       setPending((p) => p.filter((id) => id !== row.instance_id));
     }
   }
   function later(row: VaultRow) {
     setSkipped((s) => [...s.filter((id) => id !== row.instance_id), row.instance_id]);
+    setSaid(`Put off ${row.name}.${nextAfter(row)}`);
   }
+  const live = (
+    <p className="pf-visually-hidden" role="status">
+      {said}
+    </p>
+  );
 
   // K, S and L decide on the drop on screen, unless you are typing somewhere.
   useEffect(() => {
@@ -178,9 +201,12 @@ function Drops(props: { drops: VaultRow[]; reviewed: VaultRow[]; rows: VaultRow[
   if (!current) {
     return (
       <>
-        <EmptyState pose="happy" title="No new drops to review">
-          Weapons that drop after your first sync show up here, so you can keep or shard each one while it's fresh.
-        </EmptyState>
+        {live}
+        <div ref={emptyRef} tabIndex={-1} className="pf-triage__empty">
+          <EmptyState pose="happy" title="No new drops to review">
+            Weapons that drop after your first sync show up here, so you can keep or shard each one while it's fresh.
+          </EmptyState>
+        </div>
         {props.reviewed.length > 0 && <Reviewed rows={props.reviewed} onUndo={(r) => decide(null, r)} />}
       </>
     );
@@ -191,6 +217,7 @@ function Drops(props: { drops: VaultRow[]; reviewed: VaultRow[]; rows: VaultRow[
   const tip = suggestion(current, others);
   return (
     <div className="pf-triage__drops">
+      {live}
       <DropCard
         row={current}
         others={others}
@@ -384,7 +411,7 @@ function Dupes(props: { groups: VaultRow[][]; onOpenWeapon: (id: string) => void
       setError(String(e));
     }
   }
-  async function shardOthers(name: string, rest: VaultRow[]) {
+  async function shardOthers(name: string, rest: VaultRow[], group: HTMLElement | null) {
     const n = rest.length;
     const ok = await confirm({
       title: `Mark ${n} ${n === 1 ? "copy" : "copies"} of ${name} to shard?`,
@@ -398,6 +425,9 @@ function Dupes(props: { groups: VaultRow[][]; onOpenWeapon: (id: string) => void
     });
     if (!ok) return;
     await Promise.all(rest.map((c) => mark(c, "shard")));
+    // The button is gone now; keep focus in the weapon's group.
+    const a = document.activeElement;
+    if (group?.isConnected && (!a || a === document.body || !a.isConnected)) group.focus();
     toast({
       tone: "success",
       text: `Marked ${n} ${n === 1 ? "copy" : "copies"} of ${name} to shard.`,
@@ -417,7 +447,7 @@ function Dupes(props: { groups: VaultRow[][]; onOpenWeapon: (id: string) => void
         const keeper = copies.find((c) => c.mark === "keep") ?? copies.find((c) => c.mark !== "shard");
         const rest = keeper ? copies.filter((c) => c !== keeper && !c.mark) : [];
         return (
-          <section key={top.weapon} className="pf-panel pf-dupe" aria-label={top.name}>
+          <section key={top.weapon} className="pf-panel pf-dupe" aria-label={top.name} tabIndex={-1}>
             <div className="pf-dupe__head">
               <span className="pf-wrow__icon" data-rarity={top.look.rarity}>
                 <span className="pf-tile__fallback" aria-hidden="true">
@@ -432,7 +462,7 @@ function Dupes(props: { groups: VaultRow[][]; onOpenWeapon: (id: string) => void
                 </span>
               </span>
               {rest.length > 0 && (
-                <button type="button" className="pf-btn pf-btn--small" onClick={() => shardOthers(top.name, rest)}>
+                <button type="button" className="pf-btn pf-btn--small" onClick={(e) => shardOthers(top.name, rest, e.currentTarget.closest("section"))}>
                   <Trash2 size={14} aria-hidden="true" />
                   {keeper === top ? "" : `Keep #${copies.indexOf(keeper!) + 1}, `}
                   {keeper === top ? "Mark" : "mark"} the other {rest.length} to shard

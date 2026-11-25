@@ -43,6 +43,8 @@ export type SyncSummary = {
   not_scored: number;
   manifest_version: string;
   synced_at: number;
+  /** Copies this sync saw for the first time. */
+  new_drops?: number;
 };
 
 export type Verdict = "keep" | "upgrade" | "replace" | "shard";

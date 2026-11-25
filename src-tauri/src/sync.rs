@@ -70,6 +70,8 @@ pub struct SyncSummary {
     manifest_version: String,
     /// Unix seconds.
     synced_at: i64,
+    /// Copies this sync saw for the first time (new drops); 0 on a baseline sync.
+    new_drops: usize,
 }
 
 fn now() -> i64 {
@@ -211,6 +213,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
     let switched = previous.as_deref().is_some_and(|p| p != membership_id);
     db.replace_copies(&read.copies, &synced_at.to_string(), switched).map_err(|e| e.to_string())?;
     db.set_meta(META_COPIES_ACCOUNT, &membership_id).map_err(|e| e.to_string())?;
+    let new_drops = db.first_seen_at(&synced_at.to_string()).map_err(|e| e.to_string())?;
     let ratings = db.ratings().map_err(|e| e.to_string())?;
     let rolls = db.rolls().map_err(|e| e.to_string())?;
     let rules = ScoringRules::default();
@@ -239,6 +242,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         god_roll_error,
         manifest_version,
         synced_at,
+        new_drops,
     })
 }
 

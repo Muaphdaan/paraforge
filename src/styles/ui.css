@@ -643,8 +643,10 @@
 
 .pf-menu__item svg { color: var(--text-muted); }
 .pf-menu__item:hover,
+.pf-menu__item[data-active],
 .pf-menu__item:focus-visible { outline: none; box-shadow: none; background: var(--panel-raised); }
 .pf-menu__item:hover svg,
+.pf-menu__item[data-active] svg,
 .pf-menu__item:focus-visible svg { color: var(--accent); }
 .pf-menu__item kbd { color: var(--text-muted); font: inherit; font-size: var(--text-caption); }
 

@@ -15,8 +15,9 @@ export type MenuDef = {
   label: string;
   /** The letter that opens the menu with Alt, shown underlined. */
   mnemonic: string;
-  /** Built when the menu opens, so enabled and checked states are current. */
-  items: () => MenuItem[];
+  /** Built when the menu opens, so enabled and checked states are current. `target` is the
+   * element that had focus before the menu opened (the field Edit acts on). */
+  items: (target: Element | null) => MenuItem[];
 };
 
 type Win = ReturnType<typeof getCurrentWindow>;
@@ -121,15 +122,19 @@ function MenuBar({ menus }: { menus: MenuDef[] }) {
   // Roving focus between the menu titles.
   const [current, setCurrent] = useState(0);
   const bar = useRef<HTMLDivElement>(null);
-  // What had focus before the menus were used, to give it back when they close.
+  // What had focus before the menus were used, to give it back when they close (null when the
+  // menus were reached by tabbing to a title).
   const origin = useRef<HTMLElement | null>(null);
 
   const titleButton = (i: number) => bar.current?.querySelectorAll<HTMLElement>("[data-menu-title]")[i] ?? null;
 
   const openMenu = useCallback(
     (i: number, keyboard: boolean) => {
-      if (!open && !bar.current?.contains(document.activeElement)) {
-        origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // A modal dialog owns the screen; the menus wait until it closes.
+      if (document.querySelector(".pf-modal")) return;
+      if (!open) {
+        const a = document.activeElement;
+        origin.current = a instanceof HTMLElement && a !== document.body && !bar.current?.contains(a) ? a : null;
       }
       setCurrent(i);
       setOpen({ id: menus[i].id, keyboard });
@@ -137,18 +142,25 @@ function MenuBar({ menus }: { menus: MenuDef[] }) {
     [menus, open],
   );
 
-  const close = useCallback((refocus: "title" | "origin" | "none") => {
-    setOpen(null);
-    if (refocus === "title") titleButton(current)?.focus();
-    if (refocus === "origin" && origin.current?.isConnected) origin.current.focus();
-  }, [current]);
+  /** "back": to where focus was before (or the menu title, when the menus were reached by Tab). */
+  const close = useCallback(
+    (refocus: "back" | "none") => {
+      setOpen(null);
+      if (refocus === "back") {
+        if (origin.current?.isConnected) origin.current.focus();
+        else titleButton(current)?.focus();
+      }
+      origin.current = null;
+    },
+    [current],
+  );
 
   // Alt + the underlined letter opens that menu from anywhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const i = menus.findIndex((m) => m.mnemonic.toLowerCase() === e.key.toLowerCase());
-      if (i < 0) return;
+      if (i < 0 || document.querySelector(".pf-modal")) return;
       e.preventDefault();
       openMenu(i, true);
     };
@@ -209,6 +221,7 @@ function MenuBar({ menus }: { menus: MenuDef[] }) {
         <MenuPopup
           key={open.id}
           def={menus[openIndex]}
+          target={origin.current}
           anchor={titleButton(openIndex)}
           keyboard={open.keyboard}
           onClose={close}
@@ -233,18 +246,26 @@ function Mnemonic({ label, letter }: { label: string; letter: string }) {
 
 function MenuPopup(props: {
   def: MenuDef;
+  /** The element the menu acts on (the field in use), for Edit. */
+  target: Element | null;
   anchor: HTMLElement | null;
   keyboard: boolean;
-  onClose: (refocus: "title" | "origin" | "none") => void;
+  onClose: (refocus: "back" | "none") => void;
   onStep: (dir: 1 | -1) => void;
 }) {
   // Built once per opening, so the states shown match what the items do.
-  const [items] = useState(props.def.items);
+  const [items] = useState(() => props.def.items(props.target));
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const enabled = items.flatMap((it, i) => (it !== "separator" && !it.disabled ? [i] : []));
   const [active, setActive] = useState(props.keyboard ? (enabled[0] ?? -1) : -1);
-  const { onClose } = props;
+  // Focus moves into the menu only once the keyboard is used; hovering just highlights.
+  const [keyboard, setKeyboard] = useState(props.keyboard);
+  const { onClose, onStep } = props;
+
+  // The key handler reads the latest state through a ref, so it is registered once.
+  const live = useRef({ active, enabled, items });
+  live.current = { active, enabled, items };
 
   useLayoutEffect(() => {
     if (!props.anchor || !box.current) return;
@@ -254,21 +275,80 @@ function MenuPopup(props: {
   }, [props.anchor]);
 
   useEffect(() => {
-    if (active < 0) return;
+    if (!keyboard || active < 0) return;
     box.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.focus();
-  }, [active]);
+  }, [active, keyboard]);
+
+  const run = useCallback(
+    (item: Exclude<MenuItem, "separator">) => {
+      if (item.disabled) return;
+      // Focus goes back first, so Edit commands act on the field that was in use.
+      onClose("back");
+      item.run();
+    },
+    [onClose],
+  );
 
   useEffect(() => {
     const away = (e: Event) => {
       if (e.target instanceof Node && (box.current?.contains(e.target) || props.anchor?.contains(e.target))) return;
+      // A click elsewhere moves focus itself; a blur or resize leaves it where it was.
       onClose("none");
     };
+    // The menu's keys work wherever focus is (a menu opened by mouse leaves it in the field).
+    // Only the keys the menu uses are stopped; the rest reach the app's own shortcuts.
     const onKey = (e: KeyboardEvent) => {
-      // Escape closes only the menu; nothing under it sees the key.
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      onClose(props.keyboard ? "title" : "none");
+      const { active: at, enabled: on, items: list } = live.current;
+      const take = () => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+      const go = (i: number | undefined) => {
+        setKeyboard(true);
+        if (i !== undefined) setActive(i);
+      };
+      const pos = on.indexOf(at);
+      switch (e.key) {
+        case "Escape":
+          take();
+          onClose("back");
+          break;
+        case "ArrowDown":
+          take();
+          go(on[pos < 0 ? 0 : (pos + 1) % on.length]);
+          break;
+        case "ArrowUp":
+          take();
+          go(on[pos < 0 ? on.length - 1 : (pos - 1 + on.length) % on.length]);
+          break;
+        case "Home":
+          take();
+          go(on[0]);
+          break;
+        case "End":
+          take();
+          go(on[on.length - 1]);
+          break;
+        case "ArrowRight":
+        case "ArrowLeft":
+          take();
+          onStep(e.key === "ArrowRight" ? 1 : -1);
+          break;
+        case "Tab":
+          take();
+          onClose("back");
+          break;
+        case "Enter":
+        case " ": {
+          const item = list[at];
+          // A focused item runs from its own click; this covers a highlighted one without focus.
+          if (item && item !== "separator" && !box.current?.contains(document.activeElement)) {
+            take();
+            run(item);
+          }
+          break;
+        }
+      }
     };
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", onKey, true);
@@ -280,34 +360,7 @@ function MenuPopup(props: {
       window.removeEventListener("blur", away);
       window.removeEventListener("resize", away);
     };
-  }, [onClose, props.anchor, props.keyboard]);
-
-  const run = (item: Exclude<MenuItem, "separator">) => {
-    if (item.disabled) return;
-    // Focus goes back first, so Edit commands act on the field that was in use.
-    onClose("origin");
-    item.run();
-  };
-
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    const at = enabled.indexOf(active);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      if (enabled.length === 0) return;
-      const step = e.key === "ArrowDown" ? 1 : -1;
-      setActive(enabled[(at + step + enabled.length) % enabled.length] ?? enabled[0]);
-    } else if (e.key === "Home" || e.key === "End") {
-      e.preventDefault();
-      setActive(e.key === "Home" ? enabled[0] : enabled[enabled.length - 1]);
-    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      e.preventDefault();
-      props.onStep(e.key === "ArrowRight" ? 1 : -1);
-    } else if (e.key === "Tab") {
-      e.preventDefault();
-      onClose("origin");
-    }
-  };
+  }, [onClose, onStep, run, props.anchor]);
 
   return createPortal(
     <div
@@ -316,31 +369,31 @@ function MenuPopup(props: {
       role="menu"
       aria-label={props.def.label}
       style={pos ?? { left: -9999, top: -9999 }}
-      onKeyDown={onKeyDown}
       onMouseDown={(e) => e.preventDefault()}
     >
       {items.map((item, i) =>
         item === "separator" ? (
           <div key={`sep-${i}`} className="pf-menu__sep" role="separator" />
         ) : (
-            <button
-              key={item.label}
-              type="button"
-              role={item.checked === undefined ? "menuitem" : "menuitemradio"}
-              aria-checked={item.checked}
-              aria-disabled={item.disabled || undefined}
-              data-index={i}
-              className="pf-menu__item"
-              tabIndex={i === active ? 0 : -1}
-              onMouseEnter={() => !item.disabled && setActive(i)}
-              onClick={() => run(item)}
-            >
-              <span className="pf-menu__check" aria-hidden="true">
-                {item.checked && <Check size={16} strokeWidth={3} />}
-              </span>
-              <span>{item.label}</span>
-              {item.keys ? <kbd>{item.keys}</kbd> : <span />}
-            </button>
+          <button
+            key={item.label}
+            type="button"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
+            aria-disabled={item.disabled || undefined}
+            data-index={i}
+            data-active={i === active || undefined}
+            className="pf-menu__item"
+            tabIndex={i === active ? 0 : -1}
+            onMouseEnter={() => !item.disabled && setActive(i)}
+            onClick={() => run(item)}
+          >
+            <span className="pf-menu__check" aria-hidden="true">
+              {item.checked && <Check size={16} strokeWidth={3} />}
+            </span>
+            <span>{item.label}</span>
+            {item.keys ? <kbd>{item.keys}</kbd> : <span />}
+          </button>
         ),
       )}
     </div>,

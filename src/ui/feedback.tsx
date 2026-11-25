@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { CircleAlert, CircleCheck, Info, X } from "lucide-react";
@@ -50,7 +49,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         // Always in the page, so screen readers hear toasts added to it.
         <div className="pf-toasts" role="region" aria-label="Notifications" aria-live="polite">
           {toasts.map((t) => (
-            <ToastCard key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+            <ToastCard key={t.id} toast={t} dismiss={dismiss} />
           ))}
         </div>,
         document.body,
@@ -59,16 +58,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+function ToastCard({ toast, dismiss }: { toast: Toast; dismiss: (id: number) => void }) {
   const tone = toast.tone ?? "info";
   const Icon = TOAST_ICONS[tone];
   // Hovering or focusing the toast holds it open.
   const [held, setHeld] = useState(false);
+  const { id } = toast;
+  const onDismiss = () => dismiss(id);
+  // Each toast keeps its own timer; other toasts coming and going don't restart it.
   useEffect(() => {
     if (held) return;
-    const t = window.setTimeout(onDismiss, toast.action ? TOAST_ACTION_MS : TOAST_MS);
+    const t = window.setTimeout(() => dismiss(id), toast.action ? TOAST_ACTION_MS : TOAST_MS);
     return () => window.clearTimeout(t);
-  }, [held, onDismiss, toast.action]);
+  }, [held, dismiss, id, toast.action]);
   return (
     <div
       className="pf-toast"
@@ -163,18 +165,32 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
     (danger ? cancelBtn : confirmBtn).current?.focus();
   }, [danger]);
 
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      onClose(false);
-    } else if (e.key === "Tab") {
-      // Focus stays in the dialog: Tab moves between its two buttons.
-      e.preventDefault();
-      const other = document.activeElement === cancelBtn.current ? confirmBtn.current : cancelBtn.current;
-      other?.focus();
-    }
-  };
+  // The dialog owns the keyboard wherever focus is: Escape cancels, Tab moves between its two
+  // buttons, and the app's shortcuts and menus can't act on the page behind it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose(false);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        const other = document.activeElement === cancelBtn.current ? confirmBtn.current : cancelBtn.current;
+        other?.focus();
+      } else if (e.ctrlKey || e.altKey || e.metaKey || /^F\d+$/.test(e.key)) {
+        // Copying the dialog's text still works.
+        if (!(e.ctrlKey && e.key.toLowerCase() === "c")) e.preventDefault();
+        e.stopPropagation();
+      } else {
+        // Plain keys (K, S, L...) must not reach the page behind either; Enter and Space still
+        // press the focused button.
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
 
   return createPortal(
     <div className="pf-modal" onMouseDown={(e) => e.target === e.currentTarget && onClose(false)}>
@@ -185,7 +201,8 @@ function ConfirmDialog({ options, onClose }: { options: ConfirmOptions; onClose:
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={options.body ? bodyId : undefined}
-        onKeyDown={onKeyDown}
+        // A click on the text keeps focus in the dialog.
+        tabIndex={-1}
       >
         <h2 id={titleId} className="pf-modal__title">
           {options.title}

@@ -1368,3 +1368,7 @@ kbd {
 @media (max-width: 1100px) {
   .pf-drop__body { grid-template-columns: 1fr; }
 }
+
+/* Focus lands here after the last drop or a bulk mark; no ring on these containers. */
+.pf-triage__empty:focus,
+.pf-dupe:focus { outline: none; }

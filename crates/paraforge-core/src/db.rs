@@ -468,6 +468,13 @@ impl Database {
         Ok(())
     }
 
+    /// How many copies were first seen by the sync stamped `synced_at`.
+    pub fn first_seen_at(&self, synced_at: &str) -> Result<usize> {
+        let n: i64 =
+            self.conn.query_row("SELECT COUNT(*) FROM weapon_copy WHERE first_seen = ?1", [synced_at], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     pub fn copies(&self) -> Result<Vec<WeaponCopy>> {
         let mut stmt = self.conn.prepare(
             "SELECT instance_id, weapon_hash, tier, columns, masterworked, locked, stats, location, parts

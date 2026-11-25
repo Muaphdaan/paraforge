@@ -57,10 +57,15 @@ export function StatusBar({ onNavigate }: { onNavigate: (page: PageId) => void }
         onClick={busy ? undefined : signedIn ? session.sync : () => onNavigate("settings")}
         aria-disabled={busy || undefined}
         data-tip={sync.tip}
+        aria-description={sync.tip}
       >
         <sync.Icon size={14} className={busy ? "pf-spin" : undefined} aria-hidden="true" />
-        <span aria-live="polite">{sync.text}</span>
+        <span>{sync.text}</span>
       </button>
+      {/* Announces the sync state when it changes, without the ticking "3 min ago". */}
+      <span className="pf-visually-hidden" aria-live="polite">
+        {session.syncStep ?? (session.syncError ? "Sync failed" : "")}
+      </span>
       {info?.player && signedIn && (
         <span className="pf-statusbar__item" data-tip="The Bungie account ParaForge reads">
           <UserRound size={14} aria-hidden="true" />
@@ -102,6 +107,8 @@ export function StatusBar({ onNavigate }: { onNavigate: (page: PageId) => void }
       {info && (
         <span
           className={`pf-statusbar__item${rollError ? " pf-statusbar--warn" : ""}`}
+          // Reachable by Tab when there is an error, so its tooltip can be read.
+          tabIndex={rollError ? 0 : undefined}
           data-tip={
             rollError
               ? `The god-roll list could not be updated: ${rollError}. ParaForge keeps the last good rolls.`
@@ -111,6 +118,11 @@ export function StatusBar({ onNavigate }: { onNavigate: (page: PageId) => void }
         >
           {rollError ? <CircleAlert size={14} aria-hidden="true" /> : <Crown size={14} aria-hidden="true" />}
           {info.god_rolls > 0 ? `${info.god_rolls.toLocaleString()} god rolls` : "No god rolls yet"}
+          {rollError && (
+            <span className="pf-visually-hidden">
+              {`. The god-roll list could not be updated: ${rollError}. ParaForge keeps the last good rolls.`}
+            </span>
+          )}
         </span>
       )}
       <span className="pf-statusbar__item" data-tip="Scores are for this mode; change it in the header or View menu">

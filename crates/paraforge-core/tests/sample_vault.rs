@@ -423,6 +423,8 @@ fn new_drops_and_marks() {
     db.replace_copies(&[a.clone(), b.clone(), c.clone()], "300", false).unwrap();
     let rows = seen(&db);
     assert_eq!(rows["c"], (200, None));
+    assert_eq!(db.first_seen_at("300").unwrap(), 0);
+    assert_eq!(db.first_seen_at("200").unwrap(), 1);
     assert_eq!(rows["a"].0, 0);
     assert_eq!(rows["b"].1.as_deref(), Some("shard"));
 

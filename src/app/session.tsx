@@ -22,6 +22,8 @@ type Session = {
   syncError: string | null;
   /** The error came from an automatic sync: shown in the header and sidebar, not as a banner. */
   syncErrorAuto: boolean;
+  /** How the last sync ended; a new object each time one ends. */
+  lastSync: { auto: boolean; ok: boolean; newDrops: number } | null;
   clearSyncError: () => void;
   sync: () => Promise<void>;
   /** Bumped after every successful sync, so lists know to reload. */
@@ -106,6 +108,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [syncStep, setSyncStep] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncErrorAuto, setSyncErrorAuto] = useState(false);
+  const [lastSync, setLastSync] = useState<Session["lastSync"]>(null);
   const [dataVersion, setDataVersion] = useState(0);
   const [context, setContextState] = useState<ScoreContext>(readContext);
   const setContext = useCallback((next: ScoreContext) => {
@@ -212,10 +215,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSyncErrorAuto(false);
       setInfoLoaded(true);
       autoFailures.current = 0;
+      setLastSync({ auto, ok: true, newDrops: result.new_drops ?? 0 });
     } catch (e) {
       if (auto) autoFailures.current += 1;
       setSyncError(String(e));
       setSyncErrorAuto(auto);
+      setLastSync({ auto, ok: false, newDrops: 0 });
       // A sync can store a new item database before a later step fails, so lists read again.
       setDataVersion((v) => v + 1);
       // A refused sign-in shows up here first; refresh the status so the banner is right.
@@ -303,6 +308,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     syncStep,
     syncError,
     syncErrorAuto,
+    lastSync,
     clearSyncError: useCallback(() => setSyncError(null), []),
     sync,
     dataVersion,
