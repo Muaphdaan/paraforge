@@ -165,6 +165,11 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE weapon ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE weapon_copy ADD COLUMN parts TEXT NOT NULL DEFAULT '[]';
     "#,
+    // 7: god-roll titles, notes, tags and picks; the wish-list section each roll came from
+    r#"
+    ALTER TABLE curated_roll ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+    ALTER TABLE curated_roll ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+    "#,
 ];
 
 const WEAPON_COLUMNS: &str = "hash, name, type_name, columns, socket_indexes, look, pools, parts";
@@ -292,7 +297,7 @@ impl Database {
 
     /// Number of rows in one of ParaForge's own tables.
     pub fn count(&self, table: &str) -> Result<usize> {
-        if !["weapon", "perk", "weapon_copy"].contains(&table) {
+        if !["weapon", "perk", "weapon_copy", "curated_roll"].contains(&table) {
             return Err(DbError::Corrupt(format!("no count for table {table:?}")));
         }
         let n: i64 = self.conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
@@ -315,6 +320,7 @@ impl Database {
             "SELECT {WEAPON_COLUMNS}, (SELECT COUNT(*) FROM weapon_copy c WHERE c.weapon_hash = weapon.hash) FROM weapon"
         ))?;
         let rows = stmt.query_map([], |r| Ok((weapon_from_row(r)?, r.get::<_, i64>(8)?)))?;
+        let meta = self.meta_counts()?;
         let mut out = Vec::new();
         for row in rows {
             let (raw, owned) = row?;
@@ -331,6 +337,7 @@ impl Database {
                 pools: def.pools,
                 parts: def.parts,
                 owned: owned as u32,
+                meta: meta.get(&def.hash).copied().unwrap_or(0),
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name).then(a.hash.cmp(&b.hash)));
@@ -511,7 +518,8 @@ impl Database {
         tx.execute("DELETE FROM curated_roll WHERE source_id = ?1", [source_id])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO curated_roll(weapon_hash, context, columns, curator, source_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO curated_roll(weapon_hash, context, columns, curator, source_id, detail, origin)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             for roll in rolls {
                 stmt.execute(params![
@@ -519,7 +527,9 @@ impl Database {
                     roll.context.as_str(),
                     serde_json::to_string(&roll.columns)?,
                     roll.curator,
-                    source_id
+                    source_id,
+                    serde_json::to_string(roll)?,
+                    roll.source
                 ])?;
             }
         }
@@ -528,22 +538,59 @@ impl Database {
     }
 
     pub fn rolls(&self) -> Result<Vec<CuratedRoll>> {
-        let mut stmt =
-            self.conn.prepare("SELECT weapon_hash, context, columns, curator FROM curated_roll ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        self.rolls_where("", [])
+    }
+
+    /// Every curated roll for one weapon, in list order.
+    pub fn rolls_for(&self, weapon: WeaponHash) -> Result<Vec<CuratedRoll>> {
+        self.rolls_where("WHERE weapon_hash = ?1", [weapon.0])
+    }
+
+    fn rolls_where<P: rusqlite::Params>(&self, filter: &str, params: P) -> Result<Vec<CuratedRoll>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT weapon_hash, context, columns, curator, detail FROM curated_roll {filter} ORDER BY id"
+        ))?;
+        let rows = stmt.query_map(params, |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (weapon, context, columns, curator) = row?;
+            let (weapon, context, columns, curator, detail) = row?;
+            if !detail.is_empty() {
+                out.push(serde_json::from_str(&detail)?);
+                continue;
+            }
             out.push(CuratedRoll {
                 weapon: WeaponHash(weapon),
                 context: parse_context(&context)?,
                 columns: serde_json::from_str(&columns)?,
                 curator,
+                title: String::new(),
+                notes: String::new(),
+                tags: Vec::new(),
+                masterwork: String::new(),
+                mods: String::new(),
+                source: String::new(),
             });
         }
         Ok(out)
+    }
+
+    /// How many separate wish-list sections recommend each weapon: ParaForge's meta measure
+    /// (curator consensus). Weapons no curator lists are missing from the map.
+    pub fn meta_counts(&self) -> Result<HashMap<WeaponHash, u32>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT weapon_hash, COUNT(DISTINCT CASE WHEN origin = '' THEN curator ELSE origin END)
+             FROM curated_roll GROUP BY weapon_hash",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((WeaponHash(r.get(0)?), r.get::<_, u32>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Stores the result of a scoring pass for one context, replacing that context's previous scores,
@@ -668,6 +715,7 @@ impl Database {
                 r.get::<_, String>(13)?,
             ))
         })?;
+        let meta = self.meta_counts()?;
         let mut out = Vec::new();
         for row in rows {
             let (
@@ -701,6 +749,7 @@ impl Database {
                 stats: serde_json::from_str(&stats)?,
                 location: CopyLocation::parse(&location),
                 parts: serde_json::from_str(&parts)?,
+                meta: meta.get(&WeaponHash(weapon)).copied().unwrap_or(0),
             });
         }
         Ok(out)
@@ -736,6 +785,8 @@ pub struct CodexRow {
     pub parts: Vec<WeaponPart>,
     /// Copies the player owns.
     pub owned: u32,
+    /// How many curator sources recommend it (see [`Database::meta_counts`]); 0 for none.
+    pub meta: u32,
 }
 
 /// One line of the vault list.
@@ -759,6 +810,8 @@ pub struct VaultRow {
     pub location: CopyLocation,
     /// Intrinsic, origin trait, masterwork, mod and catalyst on this copy.
     pub parts: Vec<CopyPart>,
+    /// How many curator sources recommend this weapon; 0 for none.
+    pub meta: u32,
 }
 
 fn parse_context(value: &str) -> Result<Context> {

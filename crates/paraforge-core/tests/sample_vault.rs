@@ -58,6 +58,12 @@ fn roll(hash: u32) -> CuratedRoll {
             vec![PerkHash(TRAIT_TOP_B)],
         ],
         curator: "test".into(),
+        title: String::new(),
+        notes: String::new(),
+        tags: Vec::new(),
+        masterwork: String::new(),
+        mods: String::new(),
+        source: String::new(),
     }
 }
 
@@ -229,7 +235,7 @@ fn bad_copies_are_skipped_not_fatal() {
 fn database_round_trip() {
     let f = fixture();
     let mut db = Database::open_in_memory().unwrap();
-    assert_eq!(db.schema_version().unwrap(), 6);
+    assert_eq!(db.schema_version().unwrap(), 7);
 
     let mut defs: Vec<WeaponDef> = f.defs.values().cloned().collect();
     defs[0].look = WeaponLook {
@@ -357,7 +363,7 @@ fn reopening_a_file_keeps_data() {
         db.set_meta("k", "v").unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 6);
+    assert_eq!(db.schema_version().unwrap(), 7);
     assert_eq!(db.meta("k").unwrap().as_deref(), Some("v"));
     drop(db);
     std::fs::remove_dir_all(&dir).ok();

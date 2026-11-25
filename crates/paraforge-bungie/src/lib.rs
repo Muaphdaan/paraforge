@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod inventory;
+pub mod wishlist;
 
 use std::fmt;
 

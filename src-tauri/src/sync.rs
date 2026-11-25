@@ -12,7 +12,8 @@ use paraforge_bungie::inventory::RawProfile;
 use paraforge_bungie::inventory::{
     EnhancedPerks, RawCollectibleDef, RawItemDef, RawPlugSetDef, build_catalog, read_profile,
 };
-use paraforge_core::{Context, PerkInfo, ScoreError, ScoringRules, VaultRow, score_vault};
+use paraforge_bungie::wishlist::{self, Fetched};
+use paraforge_core::{Context, PerkInfo, Provenance, ScoreError, ScoringRules, VaultRow, score_vault};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -26,6 +27,14 @@ const META_MANIFEST: &str = "manifest_paths";
 const META_SYNCED_AT: &str = "synced_at";
 /// Bumped when ParaForge reads more from the item database, so the next sync reads it again.
 const CATALOG_VERSION: &str = "catalog-5";
+/// Bumped when ParaForge reads more from the god-roll list, so the next sync rebuilds the rolls.
+const ROLLS_VERSION: &str = "rolls-1";
+const META_ROLLS_BUILT: &str = "rolls_built";
+const META_ROLLS_ETAG: &str = "rolls_etag";
+const META_ROLLS_CHECKED: &str = "rolls_checked";
+/// How often the god-roll list is checked for changes. It changes a few times a week.
+const ROLLS_CHECK_SECS: i64 = 6 * 3600;
+const ROLLS_SOURCE: &str = "voltron";
 
 #[derive(Default)]
 pub struct SyncState {
@@ -52,6 +61,10 @@ pub struct SyncSummary {
     characters_hidden: bool,
     /// Copies the scoring engine could not score.
     not_scored: usize,
+    /// Curated god rolls stored.
+    god_rolls: usize,
+    /// Why the god-roll list could not be updated this time, if it could not. The sync still works.
+    god_roll_error: Option<String>,
     manifest_version: String,
     /// Unix seconds.
     synced_at: i64,
@@ -132,6 +145,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         progress(&app, "Reading Bungie's item database");
         let app2 = app.clone();
         let enhanced2 = enhanced.clone();
+        let wanted = wanted.clone();
         let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let items: HashMap<String, RawItemDef> = read_table(&items_file)?;
             let sets: HashMap<String, RawPlugSetDef> = read_table(&sets_file)?;
@@ -159,7 +173,11 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         result?;
     }
 
-    // 2. The player's weapons.
+    // 2. Curated god rolls, rebuilt when the list or the item database changed.
+    progress(&app, "Checking the god-roll list");
+    let (god_rolls, god_roll_error) = update_rolls(&app, &wanted).await?;
+
+    // 3. The player's weapons.
     progress(&app, "Reading your vault and characters");
     // The membership whose profile was read: Settings shows the stored Bungie Name only while the
     // same account is signed in.
@@ -175,7 +193,7 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         ));
     }
 
-    // 3. Store and score.
+    // 4. Store and score.
     progress(&app, "Scoring your weapons");
     let synced_at = now();
     let state = app.state::<AppState>();
@@ -207,9 +225,110 @@ pub async fn sync_now(app: AppHandle, sync: State<'_, SyncState>) -> Result<Sync
         unreadable: read.unreadable.len(),
         characters_hidden: read.characters_hidden,
         not_scored,
+        god_rolls,
+        god_roll_error,
         manifest_version,
         synced_at,
     })
+}
+
+fn rolls_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("godrolls");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("voltron.txt"))
+}
+
+/// Downloads the god-roll list when due and rebuilds the stored rolls when the list, the item
+/// database or ParaForge's reader changed. A failed download keeps the last good rolls and is
+/// reported, not fatal. Returns how many rolls are stored and the download error, if any.
+async fn update_rolls(app: &AppHandle, catalog: &str) -> Result<(usize, Option<String>), String> {
+    let file = rolls_file(app)?;
+    let built_for = format!("{ROLLS_VERSION}\n{catalog}");
+    let (etag, checked, built, stored) = {
+        let state = app.state::<AppState>();
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let num = |v: Option<String>| v.and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+        (
+            db.meta(META_ROLLS_ETAG).map_err(|e| e.to_string())?,
+            num(db.meta(META_ROLLS_CHECKED).map_err(|e| e.to_string())?),
+            db.meta(META_ROLLS_BUILT).map_err(|e| e.to_string())?,
+            db.count("curated_roll").map_err(|e| e.to_string())?,
+        )
+    };
+    let have_file = file.exists();
+    let mut changed = false;
+    let mut error = None;
+    let mut new_etag = None;
+    if !have_file || now() - checked >= ROLLS_CHECK_SECS {
+        match wishlist::fetch(wishlist::VOLTRON_URL, etag.as_deref().filter(|_| have_file)).await {
+            Ok(Fetched::Unchanged) => {}
+            Ok(Fetched::New { text, etag }) => {
+                let part = file.with_extension("part");
+                std::fs::write(&part, text.as_bytes())
+                    .and_then(|_| std::fs::rename(&part, &file))
+                    .map_err(|e| format!("could not save the god-roll list: {e}"))?;
+                new_etag = Some(etag.unwrap_or_default());
+                changed = true;
+            }
+            Err(e) => error = Some(e),
+        }
+    }
+    let state = app.state::<AppState>();
+    if error.is_none() {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_meta(META_ROLLS_CHECKED, &now().to_string()).map_err(|e| e.to_string())?;
+        if let Some(tag) = &new_etag {
+            db.set_meta(META_ROLLS_ETAG, tag).map_err(|e| e.to_string())?;
+        }
+    }
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_meta("rolls_error", error.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
+    }
+    let rebuild = file.exists() && (changed || built.as_deref() != Some(built_for.as_str()) || stored == 0);
+    if !rebuild {
+        return Ok((stored, error));
+    }
+    progress(app, "Reading the god-roll list");
+    let app2 = app.clone();
+    let count = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("could not read the god-roll list: {e}"))?;
+        let blocks = paraforge_core::wishlist::parse_blocks(&text);
+        drop(text);
+        let enhanced = EnhancedPerks::bundled();
+        let state = app2.state::<AppState>();
+        let mut db = state.db.lock().map_err(|e| e.to_string())?;
+        let defs = db.weapons().map_err(|e| e.to_string())?;
+        let rolls = paraforge_core::wishlist::curated_rolls(&blocks, &defs, |p| enhanced.base(p));
+        if rolls.is_empty() {
+            return Err("No god rolls matched ParaForge's weapons; the list format may have changed.".into());
+        }
+        let version = db.meta(META_ROLLS_ETAG).map_err(|e| e.to_string())?.unwrap_or_default();
+        db.upsert_source(
+            ROLLS_SOURCE,
+            &Provenance {
+                source: "voltron (48klocs/dim-wish-list-sources)".into(),
+                version,
+                license: "MIT".into(),
+                fetched: now().to_string(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        db.replace_rolls(&rolls, ROLLS_SOURCE).map_err(|e| e.to_string())?;
+        db.set_meta(META_ROLLS_BUILT, &built_for).map_err(|e| e.to_string())?;
+        Ok(rolls.len())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    match count {
+        Ok(n) => Ok((n, error)),
+        // Keep the old rolls and say why; scoring still works with them.
+        Err(e) => {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.set_meta("rolls_error", &e).map_err(|e| e.to_string())?;
+            Ok((stored, Some(e)))
+        }
+    }
 }
 
 /// Fetches the player's profile and the membership it belongs to. The access token is fetched again

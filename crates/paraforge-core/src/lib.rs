@@ -7,6 +7,7 @@ pub mod db;
 pub mod model;
 pub mod rules;
 pub mod score;
+pub mod wishlist;
 
 pub use db::{ChaseRoll, CodexRow, Database, DbError, VaultRow};
 pub use model::*;

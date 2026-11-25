@@ -2,6 +2,7 @@
 // the score with its reasons, every perk column with icons, and your other copies of the weapon.
 import { ArrowRight, Check, Lock, Sparkles } from "lucide-react";
 import { Perk, ROLE_LABELS, ScoreContext, SLOTS, VaultRow, reasonText } from "../app/api";
+import { GodRolls } from "../ui/godrolls";
 import { TierPill, VerdictPill } from "../ui/parts";
 import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
 
@@ -115,6 +116,21 @@ export function WeaponDetail(props: {
         )}
 
         <PartList parts={copyParts(row.parts)} perks={perks} exotic={row.look.rarity === 6} size={30} />
+
+        {row.columns.length > 0 && (
+          <>
+            <h3 className="pf-detail__heading">God rolls</h3>
+            <GodRolls
+              weapon={row.weapon}
+              roles={row.roles}
+              perks={perks}
+              context={props.context}
+              copy={row.columns}
+              limit={2}
+              compact
+            />
+          </>
+        )}
 
         {copies.length > 1 && (
           <>

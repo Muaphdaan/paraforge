@@ -3,22 +3,44 @@
 // pick the perks you want and chase that roll.
 import { memo, useEffect, useId, useMemo, useState } from "react";
 import { ArrowRight, Check, Crosshair, MapPin, Search, X } from "lucide-react";
-import { CodexRow, Perk, ROLE_LABELS, SLOTS, VaultRow } from "../app/api";
+import {
+  CodexRow,
+  META_TIER_LABEL,
+  META_TIER_ORDER,
+  Perk,
+  ROLE_LABELS,
+  SLOTS,
+  VaultRow,
+  byMeta,
+  metaTier,
+  metaTip,
+} from "../app/api";
 import { sameRoll, useChase } from "../app/chase";
 import { useCodex } from "../app/codex";
 import { useSession } from "../app/session";
+import { GodRolls } from "../ui/godrolls";
 import { Banner, Dropdown, EmptyState } from "../ui/parts";
-import { AmmoBadge, BungieImage, ElementBadge, ElementIcon, PartList, PerkIcon, weaponParts } from "../ui/weapon";
+import {
+  AmmoBadge,
+  BungieImage,
+  ElementBadge,
+  ElementIcon,
+  MetaMark,
+  PartList,
+  PerkIcon,
+  weaponParts,
+} from "../ui/weapon";
 
 type Owned = "all" | "owned" | "missing";
 type Rarity = "all" | "5" | "6";
-type GroupBy = "slot" | "type" | "source";
+type GroupBy = "meta" | "slot" | "type" | "source";
 
 const SLOT_ORDER = [1, 2, 3, 0];
-const PREFS_KEY = "paraforge.codexPrefs";
+// v2: meta first became the default grouping.
+const PREFS_KEY = "paraforge.codexPrefs.v2";
 
 function readPrefs(): { group: GroupBy; rarity: Rarity } {
-  const fallback = { group: "slot" as GroupBy, rarity: "all" as Rarity };
+  const fallback = { group: "meta" as GroupBy, rarity: "all" as Rarity };
   try {
     return { ...fallback, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
   } catch {
@@ -53,8 +75,17 @@ function byKey(rows: CodexRow[], key: (r: CodexRow) => string | number): Map<str
 
 const alpha = (a: string | number, b: string | number) => String(a).localeCompare(String(b));
 
-/** Rows arrive sorted by name, so each group keeps that order. */
-function organise(rows: CodexRow[], group: GroupBy): Section[] {
+/** Rows arrive sorted by name; every group puts meta weapons first and keeps name order after that. */
+function organise(input: CodexRow[], group: GroupBy): Section[] {
+  const rows = [...input].sort(byMeta);
+  if (group === "meta") {
+    const tiers = byKey(rows, (r) => metaTier(r.meta));
+    return META_TIER_ORDER.filter((t) => tiers.has(t)).map((t) => ({
+      key: `meta-${t}`,
+      title: META_TIER_LABEL[t],
+      groups: [{ key: t, title: null, rows: tiers.get(t)! }],
+    }));
+  }
   if (group === "slot") {
     const slots = byKey(rows, (r) => (SLOTS[r.look.slot] ? r.look.slot : 0));
     return SLOT_ORDER.filter((s) => slots.has(s)).map((slot) => {
@@ -225,6 +256,7 @@ export function CodexPage(props: {
             label="Group by"
             value={prefs.group}
             options={[
+              { value: "meta", label: "Meta first" },
               { value: "slot", label: "By slot" },
               { value: "type", label: "By weapon type" },
               { value: "source", label: "By source" },
@@ -321,7 +353,13 @@ export function CodexPage(props: {
 /** A Codex tile: the icon with its season badge, the element, and how many you own. Unowned tiles are dimmed. */
 const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: boolean; onSelect: (hash: number) => void }) {
   const { row } = props;
-  const label = [row.name, row.type_name, row.look.source, row.owned > 0 ? `you own ${row.owned}` : "not owned"]
+  const label = [
+    row.name,
+    row.type_name,
+    row.look.source,
+    metaTier(row.meta) === "meta" ? "meta pick" : "",
+    row.owned > 0 ? `you own ${row.owned}` : "not owned",
+  ]
     .filter(Boolean)
     .join(", ");
   return (
@@ -333,7 +371,7 @@ const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: bool
       data-owned={row.owned > 0 || undefined}
       aria-pressed={props.selected}
       aria-label={label}
-      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.look.source ? ` · ${row.look.source}` : ""}${row.owned > 0 ? ` · You own ${row.owned}` : ""}`}
+      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.look.source ? ` · ${row.look.source}` : ""}${row.owned > 0 ? ` · You own ${row.owned}` : ""}${row.meta ? `\n${metaTip(row.meta)}` : ""}`}
       onClick={() => props.onSelect(row.hash)}
     >
       <span className="pf-tile__art">
@@ -342,6 +380,7 @@ const CodexTile = memo(function CodexTile(props: { row: CodexRow; selected: bool
         </span>
         <BungieImage path={row.look.icon} className="pf-tile__icon" />
         <BungieImage path={row.look.watermark} className="pf-tile__watermark" />
+        <MetaMark meta={row.meta} />
       </span>
       <span className="pf-tile__bar" aria-hidden="true">
         <span className="pf-tile__element">
@@ -366,6 +405,7 @@ function CodexDetail(props: {
 }) {
   const { row, perks, copies } = props;
   const chase = useChase();
+  const session = useSession();
   const exotic = row.look.rarity === 6;
   const [rawPicks, setPicks] = useState<number[][]>(() =>
     kept.picks?.hash === row.hash ? kept.picks.picks : row.pools.map(() => []),
@@ -458,7 +498,24 @@ function CodexDetail(props: {
           </>
         )}
 
-        <h3 className="pf-detail__heading">{row.pools.length > 0 ? "Pick the roll you want" : "Perks"}</h3>
+        {row.pools.length > 0 && (
+          <>
+            <h3 className="pf-detail__heading">God rolls and guide</h3>
+            <GodRolls
+              weapon={row.hash}
+              roles={row.roles}
+              perks={perks}
+              context={session.context}
+              copy={best?.columns}
+              limit={3}
+              compact
+              onChase={(roll) => chase.add(row.hash, roll.columns).then(() => undefined)}
+              isChased={(roll) => chase.list?.some((c) => c.weapon === row.hash && sameRoll(c.perks, roll.columns)) ?? false}
+            />
+          </>
+        )}
+
+        <h3 className="pf-detail__heading">{row.pools.length > 0 ? "Or pick your own roll" : "Perks"}</h3>
         {row.pools.length === 0 ? (
           <p className="pf-muted">This weapon has fixed perks, so there is no roll to chase.</p>
         ) : (

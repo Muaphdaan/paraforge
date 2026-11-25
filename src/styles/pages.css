@@ -572,7 +572,7 @@ kbd {
   grid-template-areas:
     "hero hero hero"
     "verdict perks stats"
-    "rolls copies copies";
+    "rolls rolls copies";
   gap: var(--gap);
   align-items: start;
 }
@@ -818,7 +818,8 @@ kbd {
       "hero hero"
       "perks perks"
       "verdict stats"
-      "copies rolls";
+      "rolls rolls"
+      "copies copies";
   }
 
   .pf-weapon__score { padding-left: 0; border-left: 0; }
@@ -1193,3 +1194,101 @@ kbd {
   }
   .pf-sources { max-height: 320px; }
 }
+
+/* ---------- God rolls ---------- */
+.pf-godrolls { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.pf-godrolls__filters { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.pf-chipbtn--small { height: 30px; padding: 0 var(--space-3); font-size: var(--text-label); }
+.pf-godrolls__list { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.pf-godrolls__more { align-self: flex-start; }
+.pf-godrolls__credit { font-size: var(--text-caption); }
+
+.pf-roll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: rgb(11 13 31 / 0.35);
+}
+
+.pf-roll[data-god] { border-color: rgb(232 197 71 / 0.45); }
+
+.pf-roll__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pf-roll__title { flex: 1 1 200px; min-width: 0; font-size: var(--text-name); }
+.pf-roll__mode--pve { border-color: var(--accent); color: var(--accent); }
+.pf-roll__mode--pvp { border-color: var(--accent-2); color: var(--accent-2); }
+.pf-roll__god { border-color: var(--exotic); color: var(--exotic); }
+
+.pf-roll__match { color: var(--text-muted); font-size: var(--text-label); font-weight: 700; }
+.pf-roll__match[data-full] { display: inline-flex; align-items: center; gap: 4px; color: var(--keep); }
+
+.pf-roll__combo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.pf-roll__col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pf-roll__perks { display: flex; flex-direction: column; gap: 4px; }
+.pf-roll__any { font-size: var(--text-label); }
+
+.pf-roll__perk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-label);
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.pf-roll__perk[data-have] { opacity: 1; color: var(--keep); }
+.pf-roll__perk[data-have] .pf-perk { box-shadow: 0 0 0 2px var(--keep); }
+
+.pf-roll__picks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); margin: 0; }
+.pf-roll__picks div { display: flex; flex-direction: column; gap: 2px; }
+.pf-roll__picks dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pf-roll__picks dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-weight: 700; }
+.pf-roll__src {
+  padding: 0 7px;
+  border: 1px solid var(--control-outline);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pf-roll__tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-roll__guide { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.pf-roll__notes { margin: 0; color: var(--text); font-size: var(--text-body); line-height: 1.5; white-space: pre-line; }
+.pf-roll__by { font-size: var(--text-caption); }
+
+.pf-godrolls[data-compact] .pf-roll { padding: var(--space-3); }
+.pf-godrolls[data-compact] .pf-roll__combo { grid-template-columns: 1fr 1fr; }
+
+.pf-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-label);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pf-linkbtn:hover { text-decoration: underline; }
+
+.pf-roll__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.pf-roll__error { margin: 0; color: var(--shard); font-size: var(--text-label); }

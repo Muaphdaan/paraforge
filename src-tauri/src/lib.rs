@@ -36,6 +36,10 @@ struct AppInfo {
     weapons_known: usize,
     perks_known: usize,
     copies: usize,
+    /// Curated god rolls stored, from the community voltron list.
+    god_rolls: usize,
+    /// Why the last god-roll update failed, if it did.
+    god_roll_error: Option<String>,
     /// The scoring rules, so Settings can explain the verdict thresholds.
     rules: ScoringRules,
 }
@@ -55,6 +59,8 @@ fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         weapons_known: db.count("weapon").map_err(|e| e.to_string())?,
         perks_known: db.count("perk").map_err(|e| e.to_string())?,
         copies: db.count("weapon_copy").map_err(|e| e.to_string())?,
+        god_rolls: db.count("curated_roll").map_err(|e| e.to_string())?,
+        god_roll_error: db.meta("rolls_error").map_err(|e| e.to_string())?.filter(|e| !e.is_empty()),
         rules: ScoringRules::default(),
     })
 }
@@ -71,6 +77,13 @@ fn weapon(state: State<'_, AppState>, hash: u32) -> Result<Option<WeaponDef>, St
 fn codex(state: State<'_, AppState>) -> Result<Vec<CodexRow>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.codex().map_err(|e| e.to_string())
+}
+
+/// Every curated god roll for one weapon, PvE and PvP, in list order.
+#[tauri::command]
+fn god_rolls(state: State<'_, AppState>, weapon: u32) -> Result<Vec<paraforge_core::CuratedRoll>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.rolls_for(paraforge_core::WeaponHash(weapon)).map_err(|e| e.to_string())
 }
 
 /// The rolls the player is hunting.
@@ -158,6 +171,7 @@ pub fn run() {
             vault_scores,
             weapon,
             codex,
+            god_rolls,
             chase_list,
             chase_add,
             chase_remove,

@@ -13,6 +13,10 @@ export type AppInfo = {
   weapons_known: number;
   perks_known: number;
   copies: number;
+  /** Curated god rolls stored, from the community voltron list. */
+  god_rolls: number;
+  /** Why the last god-roll update failed, if it did. */
+  god_roll_error: string | null;
   rules: ScoringRules;
 };
 
@@ -79,6 +83,48 @@ export type CopyColumn = { options: number[]; enhanced: boolean };
 /** A weapon socket that is not a random-perk column. */
 export type PartKind = "intrinsic" | "origin" | "masterwork" | "mod" | "catalyst";
 
+/**
+ * ParaForge's meta measure is curator consensus: how many separate sections of the community
+ * god-roll list recommend a weapon. At this many it counts as a meta pick.
+ */
+export const META_TOP = 3;
+export type MetaTier = "meta" | "listed" | "none";
+export function metaTier(meta: number | undefined): MetaTier {
+  return (meta ?? 0) >= META_TOP ? "meta" : (meta ?? 0) > 0 ? "listed" : "none";
+}
+export const META_TIER_LABEL: Record<MetaTier, string> = {
+  meta: "Meta picks",
+  listed: "Also recommended",
+  none: "Everything else",
+};
+export const META_TIER_ORDER: MetaTier[] = ["meta", "listed", "none"];
+/** Meta weapons first (most curator sources first), then the rest. */
+export const byMeta = (a: { meta?: number }, b: { meta?: number }) => (b.meta ?? 0) - (a.meta ?? 0);
+export function metaTip(meta: number | undefined): string {
+  const n = meta ?? 0;
+  return n === 0 ? "" : `Recommended by ${n} curator ${n === 1 ? "source" : "sources"}`;
+}
+
+/** A curated god roll from the community voltron list, from the `god_rolls` command. */
+export type CuratedRoll = {
+  weapon: number;
+  context: ScoreContext;
+  /** Wanted perks per column; an empty column takes any perk. */
+  columns: number[][];
+  curator: string;
+  title: string;
+  /** The curator's guide: what the roll is for and how to play it. */
+  notes: string;
+  /** Lowercase tags such as "god-pve", "mkb", "controller", "pve-boss". */
+  tags: string[];
+  /** The curator's masterwork pick; empty when not given. */
+  masterwork: string;
+  /** The curator's mod pick; empty when not given. */
+  mods: string;
+  /** The list section it came from. */
+  source: string;
+};
+
 /** A part socket on a weapon definition. `pool` is filled for the frame and the origin trait. */
 export type WeaponPart = { kind: PartKind; socket_index: number; pool: number[]; empty: number[] };
 
@@ -102,6 +148,8 @@ export type VaultRow = {
   location: CopyLocation;
   /** Frame, origin trait, masterwork, mod and catalyst. Missing before the first sync with them. */
   parts?: CopyPart[];
+  /** How many curator sources recommend this weapon (ParaForge's meta measure); 0 for none. */
+  meta?: number;
 };
 
 export type CopyLocation = "vault" | "inventory" | "equipped";
@@ -135,6 +183,8 @@ export type CodexRow = {
   parts?: WeaponPart[];
   /** Copies you own. */
   owned: number;
+  /** How many curator sources recommend this weapon (ParaForge's meta measure); 0 for none. */
+  meta?: number;
 };
 
 /** A roll on the Chase list, from the `chase_list` command. */

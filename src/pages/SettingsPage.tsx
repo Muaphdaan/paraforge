@@ -327,9 +327,9 @@ function ScoringCard() {
         ) : (
           <p className="pf-muted">Loading...</p>
         )}
-        <Banner tone="warn">
-          Scores use placeholder rules ({session.info?.ruleset ?? "dev"}) until the ParaForge data pack with perk
-          ratings and god rolls arrives. Until then most weapons land around 60.
+        <Banner tone="info">
+          Scores compare each copy with the community god rolls. Perk ratings are still ParaForge&rsquo;s starter
+          rules ({session.info?.ruleset ?? "dev"}), so a weapon no curator has a roll for lands around 60.
         </Banner>
       </Card>
     </>
@@ -350,12 +350,18 @@ function DataCard() {
           <dd>{info.perks_known.toLocaleString()}</dd>
           <dt>Your weapons stored</dt>
           <dd>{info.copies.toLocaleString()}</dd>
-          <dt>ParaForge data pack</dt>
-          <dd>Not available yet</dd>
+          <dt>God rolls</dt>
+          <dd>
+            {info.god_rolls > 0
+              ? `${info.god_rolls.toLocaleString()} curated rolls from the community voltron list (MIT)`
+              : "They come with your next sync"}
+            {info.god_roll_error && <span className="pf-muted"> · Last update failed: {info.god_roll_error}</span>}
+          </dd>
         </dl>
       )}
       <p className="pf-muted">
-        Bungie's item database is downloaded again only after a game update. Everything is stored on this PC.
+        Bungie's item database is downloaded again only after a game update. The god-roll list is checked every 6
+        hours when you sync. Everything is stored on this PC.
       </p>
       <div className="pf-row">
         <button type="button" className="pf-btn" onClick={() => invoke("open_bungie_apps").catch(() => {})}>

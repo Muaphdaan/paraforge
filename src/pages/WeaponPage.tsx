@@ -18,6 +18,7 @@ import {
 } from "../app/api";
 import { useSession } from "../app/session";
 import { EmptyState, TierPill, useCopy, VerdictPill } from "../ui/parts";
+import { GodRolls } from "../ui/godrolls";
 import { AmmoBadge, BungieImage, ElementBadge, PartList, PerkIcon, copyParts } from "../ui/weapon";
 
 type ScoreMap = Record<string, CopyScore>;
@@ -92,7 +93,7 @@ export function WeaponPage(props: { instanceId: string; onSelect: (instanceId: s
       <VerdictCard row={row} scores={scores} context={session.context} />
       <PerksCard row={row} def={def} perks={session.perks} />
       <StatsCard row={row} />
-      <GodRollsCard />
+      <GodRollsCard row={row} perks={session.perks} context={session.context} />
       <CopiesCard copies={copies} current={row.instance_id} onSelect={props.onSelect} />
     </div>
   );
@@ -300,16 +301,29 @@ function StatsCard({ row }: { row: VaultRow }) {
   );
 }
 
-function GodRollsCard() {
+function GodRollsCard(props: {
+  row: VaultRow;
+  perks: ReturnType<typeof useSession>["perks"];
+  context: ScoreContext;
+}) {
+  const { row } = props;
   return (
     <section className="pf-panel pf-weapon__rolls" aria-labelledby="w-rolls">
       <h2 className="pf-panel__title" id="w-rolls">
-        God rolls
+        God rolls and guide
       </h2>
-      <p className="pf-muted">
-        No curated rolls yet. They come with the ParaForge data pack, and this card will show how close your copy is to
-        each one.
-      </p>
+      {row.columns.length === 0 ? (
+        <p className="pf-muted">This weapon has fixed perks, so every copy is the same roll.</p>
+      ) : (
+        <GodRolls
+          weapon={row.weapon}
+          roles={row.roles}
+          perks={props.perks}
+          context={props.context}
+          copy={row.columns}
+          limit={6}
+        />
+      )}
     </section>
   );
 }

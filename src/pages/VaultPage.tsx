@@ -2,7 +2,7 @@
 // with search, verdict filters, grouping, sorting and a detail panel for the selected copy.
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { LayoutGrid, List, Search, X } from "lucide-react";
-import { Perk, SLOTS, Verdict, VaultRow } from "../app/api";
+import { META_TIER_LABEL, META_TIER_ORDER, Perk, SLOTS, Verdict, VaultRow, byMeta, metaTier } from "../app/api";
 import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
 import { Dropdown, EmptyState, TierPill, VerdictPill } from "../ui/parts";
@@ -10,7 +10,7 @@ import { BungieImage, ElementIcon, PerkIcon, WeaponTile } from "../ui/weapon";
 import { WeaponDetail } from "./WeaponDetail";
 
 type View = "grid" | "list";
-type GroupBy = "slot" | "type" | "verdict";
+type GroupBy = "meta" | "slot" | "type" | "verdict";
 type SortBy = "score" | "name" | "tier";
 
 const VERDICT_ORDER: (Verdict | "none")[] = ["keep", "upgrade", "replace", "shard", "none"];
@@ -23,10 +23,11 @@ const VERDICT_NAMES: Record<Verdict | "none", string> = {
 };
 const SLOT_ORDER = [1, 2, 3, 0];
 
-const PREFS_KEY = "paraforge.vaultPrefs";
+// v2: meta first became the default grouping.
+const PREFS_KEY = "paraforge.vaultPrefs.v2";
 
 function readPrefs(): { view: View; group: GroupBy; sort: SortBy } {
-  const fallback = { view: "grid" as View, group: "slot" as GroupBy, sort: "score" as SortBy };
+  const fallback = { view: "grid" as View, group: "meta" as GroupBy, sort: "score" as SortBy };
   try {
     return { ...fallback, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
   } catch {
@@ -61,6 +62,20 @@ function byKey<T>(rows: VaultRow[], key: (r: VaultRow) => T): Map<T, VaultRow[]>
 /** Slot sections hold one group per weapon type; the other groupings have one group per section. */
 function organise(rows: VaultRow[], group: GroupBy, sort: SortBy): Section[] {
   const cmp = compare(sort);
+  if (group === "meta") {
+    // Meta picks first; inside each tier, by weapon type so copies of a weapon sit together.
+    const tiers = byKey(rows, (r) => metaTier(r.meta));
+    return META_TIER_ORDER.filter((t) => tiers.has(t)).map((t) => {
+      const types = byKey(tiers.get(t)!, (r) => r.type_name || "Other");
+      return {
+        key: `meta-${t}`,
+        title: META_TIER_LABEL[t],
+        groups: [...types.keys()]
+          .sort((a, b) => a.localeCompare(b))
+          .map((type) => ({ key: `${t}-${type}`, title: type, rows: types.get(type)!.sort((a, b) => byMeta(a, b) || cmp(a, b)) })),
+      };
+    });
+  }
   if (group === "slot") {
     const slots = byKey(rows, (r) => (SLOTS[r.look.slot] ? r.look.slot : 0));
     return SLOT_ORDER.filter((s) => slots.has(s)).map((slot) => {
@@ -225,6 +240,7 @@ export function VaultPage({
             label="Group by"
             value={prefs.group}
             options={[
+              { value: "meta", label: "Meta first" },
               { value: "slot", label: "By slot" },
               { value: "type", label: "By weapon type" },
               { value: "verdict", label: "By verdict" },
@@ -276,7 +292,11 @@ export function VaultPage({
               <span className="pf-filter__count">{counts[v] ?? 0}</span>
             </button>
           ))}
-          <span className="pf-filters__note">Scores use placeholder rules until the data pack arrives.</span>
+          <span className="pf-filters__note">
+            {session.info && session.info.god_rolls > 0
+              ? "Scored against community god rolls."
+              : "God rolls arrive with your next sync."}
+          </span>
         </div>
 
         <div className="pf-vault__scroll">

@@ -251,6 +251,24 @@ pub struct CuratedRoll {
     /// Accepted perks per column. An empty list means any perk is fine in that column.
     pub columns: Vec<Vec<PerkHash>>,
     pub curator: String,
+    /// The roll's name, for example "Action Item - PvE Minor god 1".
+    #[serde(default)]
+    pub title: String,
+    /// The curator's explanation: what the roll is for and how to play it.
+    #[serde(default)]
+    pub notes: String,
+    /// Lowercase tags such as "pve", "god-pve", "mkb", "controller", "pve-boss".
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// The curator's masterwork pick, for example "Handling or Stability". Empty when not given.
+    #[serde(default)]
+    pub masterwork: String,
+    /// The curator's mod pick, for example "Minor Spec". Empty when not given.
+    #[serde(default)]
+    pub mods: String,
+    /// The wish-list section the roll came from, which counts as one curator voice for meta ranking.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// A perk's display data from the manifest.

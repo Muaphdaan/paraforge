@@ -1,9 +1,9 @@
 // Weapon pieces shared by Vault and Home: the icon tile, element and ammo badges, perk icons.
 // Icons and screenshots come from Bungie's servers (bungie.net), like DIM and light.gg.
 import { useState } from "react";
-import { Circle, Hexagon, Lock, Snowflake, Spline, Sun, Zap } from "lucide-react";
+import { Circle, Crown, Hexagon, Lock, Snowflake, Spline, Sun, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AMMO, CopyPart, ELEMENTS, PartKind, Perk, VaultRow, WeaponPart, bungieImage } from "../app/api";
+import { AMMO, CopyPart, ELEMENTS, PartKind, Perk, VaultRow, WeaponPart, bungieImage, metaTier, metaTip } from "../app/api";
 
 const ELEMENT_ICONS: Record<number, LucideIcon> = {
   1: Circle,
@@ -76,6 +76,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
     row.tier > 0 ? `Tier ${row.tier}` : null,
     row.score ? `score ${row.score.score.toFixed(0)}, ${VERDICT_LABEL[row.score.verdict]}` : "not scored",
     row.locked ? "locked" : null,
+    metaTier(row.meta) === "meta" ? "meta pick" : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -88,7 +89,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
       data-masterworked={row.masterworked || undefined}
       aria-pressed={props.selected}
       aria-label={label}
-      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.tier > 0 ? ` · Tier ${row.tier}` : ""}${row.score ? ` · ${row.score.score.toFixed(0)} ${VERDICT_LABEL[row.score.verdict]}` : ""}`}
+      data-tip={`${row.name}\n${row.look.rarity === 6 ? "Exotic " : ""}${row.type_name}${row.tier > 0 ? ` · Tier ${row.tier}` : ""}${row.score ? ` · ${row.score.score.toFixed(0)} ${VERDICT_LABEL[row.score.verdict]}` : ""}${row.meta ? `\n${metaTip(row.meta)}` : ""}`}
       onClick={props.onSelect}
     >
       <span className="pf-tile__art">
@@ -102,6 +103,7 @@ export function WeaponTile(props: { row: VaultRow; selected?: boolean; onSelect:
             <Lock size={10} strokeWidth={3} />
           </span>
         )}
+        <MetaMark meta={row.meta} />
       </span>
       <span className="pf-tile__bar" aria-hidden="true">
         <span className="pf-tile__element">
@@ -229,5 +231,15 @@ export function PartList(props: {
         );
       })}
     </div>
+  );
+}
+
+/** A small crown on the tiles of meta weapons (see `META_TOP`). */
+export function MetaMark(props: { meta: number | undefined }) {
+  if (metaTier(props.meta) !== "meta") return null;
+  return (
+    <span className="pf-tile__meta" aria-hidden="true">
+      <Crown size={10} strokeWidth={2.5} />
+    </span>
   );
 }
