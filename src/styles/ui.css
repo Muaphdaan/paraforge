@@ -243,6 +243,15 @@
   filter: brightness(1.15);
 }
 
+.pf-status--icon {
+  justify-content: center;
+  width: var(--control-height);
+  padding: 0;
+}
+
+.pf-status--live svg { color: var(--live); }
+.pf-status--warn svg { color: var(--replace); }
+
 .pf-status__dot {
   width: 10px;
   height: 10px;

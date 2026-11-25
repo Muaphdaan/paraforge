@@ -1,22 +1,15 @@
-import { Heart, RefreshCw } from "lucide-react";
+import { Heart } from "lucide-react";
 import logo from "../assets/brand/logo.png";
 import { NAV_GROUPS, PAGES, PageId } from "../app/pages";
 import { useSession } from "../app/session";
-import { timeAgo, useNow } from "../app/time";
 import { Mascot } from "../ui/parts";
 import type { MascotPose } from "../ui/mascot";
 
 export function Sidebar(props: { page: PageId; collapsed: boolean; onNavigate: (page: PageId) => void }) {
   const session = useSession();
-  const now = useNow();
   const syncing = session.syncStep !== null;
   // The mascot reacts to the sync: thinking while it runs, puzzled when it fails.
   const pose: MascotPose = syncing ? "thinking" : session.syncError ? "confused" : "neutral";
-  const syncLine = syncing
-    ? "Syncing..."
-    : session.syncedAt
-      ? `Synced ${timeAgo(session.syncedAt, now)}`
-      : "Not synced yet";
 
   return (
     <aside className="pf-panel pf-sidebar" aria-label="ParaForge">
@@ -53,25 +46,6 @@ export function Sidebar(props: { page: PageId; collapsed: boolean; onNavigate: (
             </p>
           </>
         )}
-        <div className="pf-syncbox" style={props.collapsed ? { justifyContent: "center", padding: 4 } : undefined}>
-          {!props.collapsed && (
-            <div className="pf-syncbox__text">
-              <div>{syncLine}</div>
-              <div>v{session.info?.version ?? ""}</div>
-            </div>
-          )}
-          <button
-            type="button"
-            className="pf-iconbtn pf-iconbtn--plain"
-            onClick={session.sync}
-            disabled={!session.auth?.signed_in}
-            aria-disabled={syncing || undefined}
-            title={session.auth?.signed_in ? "Sync with Bungie now" : "Sign in to Bungie to sync"}
-          >
-            <RefreshCw size={18} className={syncing ? "pf-spin" : undefined} aria-hidden="true" />
-            <span className="pf-visually-hidden">Sync now</span>
-          </button>
-        </div>
       </div>
     </aside>
   );

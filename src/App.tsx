@@ -75,13 +75,7 @@ function Shell() {
       <div className="pf-app" data-collapsed={collapsed}>
         <Sidebar page={page} collapsed={collapsed} onNavigate={navigate} />
         <main className="pf-main">
-          <Header
-            page={page}
-            collapsed={collapsed}
-            onToggleSidebar={toggleSidebar}
-            canGoBack={history.length > 1}
-            onBack={back}
-          />
+          <Header page={page} canGoBack={history.length > 1} onBack={back} />
           <div className="pf-content">
             <Banners page={page} onNavigate={navigate} />
             <div className="pf-page">

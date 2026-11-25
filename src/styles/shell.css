@@ -172,32 +172,6 @@
   filter: drop-shadow(0 0 4px rgb(255 61 184 / 0.6));
 }
 
-.pf-syncbox {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  margin-top: var(--space-1);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: rgb(11 13 31 / 0.45);
-  color: var(--text-muted);
-  font-size: var(--text-label);
-  line-height: 1.35;
-}
-
-.pf-syncbox__text {
-  flex: 1;
-  min-width: 0;
-}
-
-.pf-syncbox__text > div {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Collapsed sidebar: icons only. */
 .pf-app[data-collapsed="true"] .pf-sidebar {
   align-items: center;
@@ -280,11 +254,6 @@
   align-items: center;
   gap: var(--space-2);
   min-height: 32px;
-}
-
-.pf-header__collapse {
-  width: 32px;
-  height: 32px;
 }
 
 .pf-crumbs {
