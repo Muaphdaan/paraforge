@@ -768,8 +768,9 @@
   grid-template-areas:
     "stats stats"
     "best health"
-    "best shard";
-  grid-template-rows: auto auto 1fr;
+    "best shard"
+    "drops shard";
+  grid-template-rows: auto auto auto 1fr;
   align-items: start;
   gap: var(--gap);
 }
@@ -810,6 +811,7 @@
 .pf-home__best { grid-area: best; }
 .pf-home__health { grid-area: health; }
 .pf-home__shard { grid-area: shard; }
+.pf-home__drops { grid-area: drops; }
 
 .pf-home__head {
   display: flex;
@@ -873,7 +875,7 @@
 @media (max-width: 1280px) {
   .pf-home {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "stats" "best" "health" "shard";
+    grid-template-areas: "stats" "best" "drops" "health" "shard";
     grid-template-rows: auto;
   }
 

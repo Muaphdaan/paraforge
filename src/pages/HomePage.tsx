@@ -1,7 +1,8 @@
 // Home: a summary of the vault for the current score context, the best weapons and what to shard.
 import { useMemo } from "react";
-import { ArrowRight, Crown, Diamond, Layers, ShieldCheck } from "lucide-react";
+import { ArrowRight, Crown, Diamond, Inbox, Layers, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { META_TIER_ORDER, metaTier } from "../app/api";
 import { PageId } from "../app/pages";
 import { useSession } from "../app/session";
 import { EmptyState, VerdictPill } from "../ui/parts";
@@ -17,6 +18,8 @@ export function HomePage({ onNavigate, onOpenWeapon }: { onNavigate: Go; onOpenW
     const list = rows ?? [];
     const count = (v: string) => list.filter((r) => r.score?.verdict === v).length;
     const scored = [...list].filter((r) => r.score).sort((a, b) => b.score!.score - a.score!.score);
+    const tier = (r: (typeof list)[number]) => META_TIER_ORDER.indexOf(metaTier(r.meta));
+    const drops = list.filter((r) => (r.first_seen ?? 0) > 0 && !r.mark).sort((a, b) => (b.first_seen ?? 0) - (a.first_seen ?? 0));
     return {
       total: list.length,
       keep: count("keep"),
@@ -24,7 +27,9 @@ export function HomePage({ onNavigate, onOpenWeapon }: { onNavigate: Go; onOpenW
       replace: count("replace"),
       shard: count("shard"),
       exotics: list.filter((r) => r.look.rarity === 6).length,
-      best: scored.slice(0, 12),
+      // Meta picks first, then the rest, each by score.
+      best: [...scored].sort((a, b) => tier(a) - tier(b)).slice(0, 12),
+      drops,
       shardList: scored.filter((r) => r.score!.verdict === "shard").reverse().slice(0, 6),
     };
   }, [rows]);
@@ -129,6 +134,25 @@ export function HomePage({ onNavigate, onOpenWeapon }: { onNavigate: Go; onOpenW
           ))}
         </div>
       </section>
+
+      {stats.drops.length > 0 && (
+        <section className="pf-panel pf-home__drops" aria-labelledby="home-drops">
+          <div className="pf-home__head">
+            <h2 className="pf-panel__title" id="home-drops">
+              New drops <span className="pf-badge">{stats.drops.length}</span>
+            </h2>
+            <button type="button" className="pf-btn pf-btn--primary pf-btn--small" onClick={() => onNavigate("triage")}>
+              <Inbox size={14} aria-hidden="true" />
+              Review
+            </button>
+          </div>
+          <div className="pf-tiles">
+            {stats.drops.slice(0, 8).map((r) => (
+              <WeaponTile key={r.instance_id} row={r} onSelect={() => onOpenWeapon(r.instance_id)} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="pf-panel pf-home__shard" aria-labelledby="home-shard">
         <h2 className="pf-panel__title" id="home-shard">
