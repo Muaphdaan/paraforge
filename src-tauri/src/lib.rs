@@ -5,6 +5,7 @@ mod actions;
 mod auth;
 mod game;
 mod sync;
+mod updates;
 #[cfg(windows)]
 mod window_style;
 
@@ -159,10 +160,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        // Updates come only from this repository's releases (endpoint and signing key in
-        // tauri.conf.json), never from an address the interface supplies.
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             auth::init_credential_store()?;
             app.manage(auth::AuthState::new()?);
@@ -187,6 +184,7 @@ pub fn run() {
             let db = Database::open(dir.join("paraforge.sqlite"))?;
             app.manage(AppState { db: Mutex::new(db) });
             app.manage(sync::SyncState::default());
+            app.manage(updates::UpdateState::default());
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 window_style::paint_title_bar(&window);
@@ -213,6 +211,8 @@ pub fn run() {
             sync::vault,
             sync::perks,
             actions::equip_copy,
+            updates::update_check,
+            updates::update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

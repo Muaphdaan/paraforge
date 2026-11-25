@@ -1,9 +1,7 @@
 // In-app updates: ParaForge checks its GitHub releases for a newer build, downloads it in the
-// background, and installs it when the player presses Restart. Builds are signed by CI, and the
-// updater refuses anything whose signature does not match the key built into the app.
+// background (the Rust side checks its SHA-256), and installs it when the player presses Restart.
 import { ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { check, Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../ui/feedback";
 
 /** First check a little after start, so it never slows the launch; then every six hours. */
@@ -13,7 +11,6 @@ const CHECK_EVERY_MS = 6 * 3_600_000;
 export type UpdateState =
   | { status: "idle" }
   | { status: "checking" }
-  | { status: "downloading"; version: string }
   | { status: "ready"; version: string }
   | { status: "current" }
   | { status: "installing"; version: string }
@@ -38,7 +35,7 @@ export const useUpdates = () => useContext(UpdatesContext);
 export function UpdatesProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const [state, setState] = useState<UpdateState>({ status: "idle" });
-  const ready = useRef<Update | null>(null);
+  const ready = useRef<{ version: string } | null>(null);
   const busy = useRef(false);
 
   const restart = useCallback(async () => {
@@ -46,9 +43,8 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
     if (!update) return;
     setState({ status: "installing", version: update.version });
     try {
-      // On Windows the installer closes ParaForge, updates it, and opens it again.
-      await update.install();
-      await relaunch();
+      // The installer closes ParaForge, updates it, and opens it again.
+      await invoke("update_install");
     } catch (e) {
       setState({ status: "ready", version: update.version });
       toast({ tone: "error", text: `The update could not be installed: ${String(e)}` });
@@ -71,14 +67,12 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       busy.current = true;
       setState({ status: "checking" });
       try {
-        const update = await check();
+        const update = await invoke<{ version: string } | null>("update_check");
         if (!update) {
           setState({ status: "current" });
           if (manual) toast({ tone: "success", text: "You have the latest ParaForge." });
           return;
         }
-        setState({ status: "downloading", version: update.version });
-        await update.download();
         ready.current = update;
         setState({ status: "ready", version: update.version });
         toast({

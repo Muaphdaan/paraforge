@@ -50,15 +50,6 @@
           "paraforge"
         ]
       }
-    },
-    "updater": {
-      "endpoints": [
-        "https://github.com/Muaphdaan/paraforge/releases/download/test-build/latest.json"
-      ],
-      "pubkey": "",
-      "windows": {
-        "installMode": "passive"
-      }
     }
   }
 }

@@ -43,29 +43,20 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       # A test installer (debug build) that can be downloaded from the run's Artifacts. Each build
-      # gets its own version (0.1.<run number>) so installed copies can tell a newer one apart. With
-      # the updater key set as a secret, the build is also signed for in-app updates.
+      # gets its own version (0.1.<run number>) so installed copies can tell a newer one apart.
       - name: Build test installer
         shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          signed=false
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then signed=true; fi
-          pnpm tauri build --debug --bundles nsis \
-            --config "{\"version\":\"0.1.${{ github.run_number }}\",\"bundle\":{\"createUpdaterArtifacts\":$signed}}"
+        run: pnpm tauri build --debug --bundles nsis --config '{"version":"0.1.${{ github.run_number }}"}'
       - uses: actions/upload-artifact@v4
         with:
           name: ParaForge-test-installer-windows
-          path: |
-            target/debug/bundle/nsis/*.exe
-            target/debug/bundle/nsis/*.exe.sig
+          path: target/debug/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 14
 
-  # Publishes the signed test build as the rolling "test-build" release, where installed copies of
-  # ParaForge look for updates. Skipped for pull requests from forks and until the key is set.
+  # Publishes the test build as the rolling "test-build" release, where installed copies of
+  # ParaForge look for updates (latest.json: version, installer address, SHA-256). Skipped for pull
+  # requests from forks.
   publish:
     name: Publish test build for in-app updates
     needs: windows
@@ -92,29 +83,25 @@ jobs:
         run: |
           set -euo pipefail
           exe=$(ls build/*.exe | head -n1)
-          if [ ! -f "$exe.sig" ]; then
-            echo "No updater signature (TAURI_SIGNING_PRIVATE_KEY not set); nothing to publish."
-            exit 0
-          fi
           name=$(basename "$exe")
           url="https://github.com/$REPO/releases/download/test-build/$name"
-          jq -n --arg v "$VERSION" --arg sig "$(cat "$exe.sig")" --arg url "$url" \
+          jq -n --arg v "$VERSION" --arg url "$url" --arg sha "$(sha256sum "$exe" | cut -d' ' -f1)" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{version: $v, notes: "ParaForge test build", pub_date: $date,
-              platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' > build/latest.json
+            '{version: $v, url: $url, sha256: $sha, pub_date: $date}' > build/latest.json
           if ! gh release view test-build --repo "$REPO" >/dev/null 2>&1; then
             gh release create test-build --repo "$REPO" --prerelease --target "$SHA" \
               --title "ParaForge test build" --notes "Rolling test build. ParaForge installs updates from here by itself."
           fi
-          # A newer build may already be published by a later run; never go backwards.
-          current=$(gh release download test-build --repo "$REPO" --pattern latest.json --output - 2>/dev/null | jq -r .version || echo "0.1.0")
+          # A later run may have published a newer build already; never go backwards.
+          current=$( (gh release download test-build --repo "$REPO" --pattern latest.json --output - 2>/dev/null || true) | jq -r '.version // "0.1.0"' 2>/dev/null || echo 0.1.0)
           if [ "${current##*.}" -ge "${VERSION##*.}" ] 2>/dev/null; then
             echo "Release already has $current; skipping $VERSION."
             exit 0
           fi
-          gh release upload test-build --repo "$REPO" --clobber "$exe" build/latest.json
-          # Old installers are no longer needed once latest.json points at the new one.
+          # Installer first, then latest.json, so the manifest never points at a missing file.
+          gh release upload test-build --repo "$REPO" --clobber "$exe"
+          gh release upload test-build --repo "$REPO" --clobber build/latest.json
           gh release view test-build --repo "$REPO" --json assets --jq '.assets[].name' \
-            | grep -E '\.exe$' | grep -vxF "$name" | while read -r old; do
+            | { grep -E '\.exe$' || true; } | { grep -vxF "$name" || true; } | while read -r old; do
               gh release delete-asset test-build "$old" --repo "$REPO" --yes
             done

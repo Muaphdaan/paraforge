@@ -429,9 +429,7 @@ function ShortcutsCard() {
 function updateText(state: ReturnType<typeof useUpdates>["state"]): string {
   switch (state.status) {
     case "checking":
-      return "Checking for updates...";
-    case "downloading":
-      return `Downloading ParaForge ${state.version}...`;
+      return "Checking for updates (a new build downloads in the background)...";
     case "ready":
       return `ParaForge ${state.version} is downloaded and ready to install.`;
     case "installing":
@@ -475,7 +473,7 @@ function AboutCard() {
           <button
             type="button"
             className="pf-btn"
-            disabled={status === "checking" || status === "downloading" || status === "installing"}
+            disabled={status === "checking" || status === "installing"}
             onClick={() => void updates.checkNow(true)}
           >
             Check for updates
